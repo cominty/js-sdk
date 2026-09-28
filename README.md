@@ -1,8 +1,8 @@
 # Cominty TypeScript SDK
 
-[![npm version](https://img.shields.io/npm/v/@cominty/sdk.svg)](https://www.npmjs.com/package/@cominty/sdk)
+[![npm version](https://img.shields.io/npm/v/@cominty-ai/sdk.svg)](https://www.npmjs.com/package/@cominty-ai/sdk)
 [![CI](https://github.com/cominty/js-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/cominty/js-sdk/actions/workflows/ci.yml)
-[![license: MIT](https://img.shields.io/npm/l/@cominty/sdk.svg)](LICENSE)
+[![license: MIT](https://img.shields.io/npm/l/@cominty-ai/sdk.svg)](LICENSE)
 
 Official TypeScript client for the Cominty managed agent chat API.
 
@@ -10,7 +10,7 @@ Start a conversation with an agent, stream its progress live, and manage threads
 — with a small, fully-typed surface and **zero runtime dependencies**.
 
 ```ts
-import { Cominty } from '@cominty/sdk'
+import { Cominty } from '@cominty-ai/sdk'
 
 const client = new Cominty() // reads COMINTY_API_KEY + COMINTY_USER_ID
 const run = await client.chat.start({
@@ -54,14 +54,14 @@ track the same API and the same release cadence.
 - A Cominty API key and your user id — see [Authentication](#authentication)
 
 The package is **ESM-only** and ships its own type declarations. From CommonJS,
-`require('@cominty/sdk')` works on Node 22.12+; on older versions use
-`await import('@cominty/sdk')`.
+`require('@cominty-ai/sdk')` works on Node 22.12+; on older versions use
+`await import('@cominty-ai/sdk')`.
 
 ## Installation
 
 ```bash
-npm install @cominty/sdk
-# or: pnpm add @cominty/sdk · yarn add @cominty/sdk · bun add @cominty/sdk
+npm install @cominty-ai/sdk
+# or: pnpm add @cominty-ai/sdk · yarn add @cominty-ai/sdk · bun add @cominty-ai/sdk
 ```
 
 ## Authentication
@@ -299,7 +299,7 @@ import {
     StreamInterrupted,   // server shut down mid-stream — carries the .partial message
     InvalidParams,       // client-side validation failed — .errors lists each problem
     SDKError,            // unexpected SDK-internal condition
-} from '@cominty/sdk'
+} from '@cominty-ai/sdk'
 
 try {
     const run = await client.chat.start({ agentId, message: 'hi' })

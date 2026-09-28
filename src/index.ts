@@ -2,7 +2,7 @@
  * Official TypeScript client for the Cominty managed agent chat API.
  *
  * ```ts
- * import { Cominty } from '@cominty/sdk'
+ * import { Cominty } from '@cominty-ai/sdk'
  *
  * const client = new Cominty()          // COMINTY_API_KEY + COMINTY_USER_ID
  * const run = await client.chat.start({

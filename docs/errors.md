@@ -27,11 +27,11 @@ ComintyError
 └── SDKError              unexpected state, or a run consumed twice
 ```
 
-All are exported from `@cominty/sdk`, and `error.name` is the class name. Catch
+All are exported from `@cominty-ai/sdk`, and `error.name` is the class name. Catch
 the specific classes you can act on and let the rest propagate:
 
 ```ts
-import { APIError, ComintyError, RateLimitError } from '@cominty/sdk'
+import { APIError, ComintyError, RateLimitError } from '@cominty-ai/sdk'
 
 try {
     const run = await client.chat.start({ agentId, message: 'hi' })
@@ -142,7 +142,7 @@ than start over.
 `InvalidParams` lists every problem at once, not just the first:
 
 ```ts
-import { InvalidParams } from '@cominty/sdk'
+import { InvalidParams } from '@cominty-ai/sdk'
 
 try {
     await client.chat.start({ agentId: '', message: 'hi', fileIds: ['a', 'b', 'c', 'd', 'e', 'f'] })
@@ -178,7 +178,7 @@ A reasonable policy:
 | `AuthError`, `PermissionError`, `NotFoundError`, `InvalidParams` | No — fix the request |
 
 ```ts
-import { RateLimitError, ServerError } from '@cominty/sdk'
+import { RateLimitError, ServerError } from '@cominty-ai/sdk'
 
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
     for (let attempt = 1; ; attempt++) {
