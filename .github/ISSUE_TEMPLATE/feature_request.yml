@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an addition or a change to the SDK
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The use case, not the solution. What is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like the API to look like?
+      render: ts
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you have tried

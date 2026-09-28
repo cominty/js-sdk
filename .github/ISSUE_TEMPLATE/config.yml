@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/cominty/js-sdk/security/advisories/new
+    about: Report a vulnerability privately. Please do not open a public issue.
+  - name: Account, billing, or agent behaviour
+    url: https://platform.cominty.ai
+    about: This tracker is for the SDK itself. For anything about your account or an agent's answers, contact Cominty support.

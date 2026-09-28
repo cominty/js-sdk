@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in the SDK does not behave as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Remove your API key and any private data before posting.** Issues are public.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest snippet that shows the problem.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output
+      description: The full error, including `error.name`, and `error.status` / `error.detail` for an `APIError`.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: SDK version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime and version
+      placeholder: Node 22.12, Bun 1.2, Cloudflare Workers…
+    validations:
+      required: true
