@@ -1,5 +1,9 @@
 # Cominty TypeScript SDK
 
+[![npm version](https://img.shields.io/npm/v/@cominty/sdk.svg)](https://www.npmjs.com/package/@cominty/sdk)
+[![CI](https://github.com/cominty/js-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/cominty/js-sdk/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/npm/l/@cominty/sdk.svg)](LICENSE)
+
 Official TypeScript client for the Cominty managed agent chat API.
 
 Start a conversation with an agent, stream its progress live, and manage threads
@@ -26,12 +30,32 @@ console.log(await run.text())
 This is a port of the [Python SDK](https://github.com/cominty/python-sdk); the two
 track the same API and the same release cadence.
 
+## Contents
+
+- [Requirements](#requirements) · [Installation](#installation) · [Authentication](#authentication)
+- [Quick start](#quick-start)
+- [Message parameters](#message-parameters) · [Configuration](#configuration) · [Error handling](#error-handling)
+- [Examples](#examples) · [Contributing](#contributing)
+
+**Going deeper:**
+
+| Guide | Covers |
+| --- | --- |
+| [API reference](docs/api.md) | Every method, parameter, type and export |
+| [Streaming guide](docs/streaming.md) | Event reference, cancelling, resuming a dropped stream, relaying to a browser |
+| [Error handling guide](docs/errors.md) | What throws where, rate limits, a retry policy |
+
 ---
 
 ## Requirements
 
-- **Node 20+** (or any runtime with global `fetch` and `ReadableStream`)
+- **Node 20+**, or any server-side runtime with global `fetch` and
+  `ReadableStream` (Bun, Deno, edge workers)
 - A Cominty API key and your user id — see [Authentication](#authentication)
+
+The package is **ESM-only** and ships its own type declarations. From CommonJS,
+`require('@cominty/sdk')` works on Node 22.12+; on older versions use
+`await import('@cominty/sdk')`.
 
 ## Installation
 
@@ -47,7 +71,7 @@ You need two things, both from [platform.cominty.ai](https://platform.cominty.ai
 1. **API key** → [platform.cominty.ai/api-keys](https://platform.cominty.ai/api-keys)
    (shown once — copy it).
 2. **Your user id** → avatar (top right) → **Profile**. It looks like
-   `user_31HPTBuBvX20xlQNAbvxjOxPbKB`.
+   `user_2aBcDeFgHiJkLmNoPqRsTuVwXyZ`.
 
 The user id identifies the end user every request acts on behalf of. It is set
 **once on the client** (or via `COMINTY_USER_ID`) and applied to every call, so
@@ -72,7 +96,12 @@ A malformed `userId` is rejected at construction, not as a server error later.
 
 > **Server-side only.** Constructing a client in a browser throws: your API key
 > would be readable by anyone who opens devtools. Call the API from your own
-> backend. `dangerouslyAllowBrowser: true` exists for trusted environments only.
+> backend — the streaming guide shows how to
+> [relay progress to a browser](docs/streaming.md#forwarding-events-to-a-browser).
+> `dangerouslyAllowBrowser: true` exists for trusted environments only.
+
+On runtimes without `process.env`, such as edge workers, pass `apiToken` and
+`userId` explicitly.
 
 ### Picking an agent
 
@@ -122,6 +151,10 @@ console.log('FINAL:', await run.text()) // available after the stream drains
 
 > A run's stream is single-use: iterate it **or** await its result. The result is
 > cached, so calling `text()` after iterating is free.
+
+In TypeScript, call `isKnownEvent(event)` first to get a fully typed `event.data`
+in each branch. The [streaming guide](docs/streaming.md) covers that, along with
+the full event reference and cancellation.
 
 ### Continue the conversation
 
@@ -184,6 +217,9 @@ const run = client.chat.stream(messageId, { lastEventId })
 for await (const event of run) console.log(event.name)
 ```
 
+See [Resuming a dropped stream](docs/streaming.md#resuming-a-dropped-stream) for
+a complete reconnect loop.
+
 ## Examples
 
 Runnable scripts live in [`examples/`](examples/):
@@ -198,9 +234,13 @@ Runnable scripts live in [`examples/`](examples/):
 | [`06-manage-thread.ts`](examples/06-manage-thread.ts) | Get, rename/star, archive |
 
 ```bash
+git clone https://github.com/cominty/js-sdk.git && cd js-sdk
 export COMINTY_API_KEY=... COMINTY_USER_ID=user_...
-node --experimental-strip-types examples/01-stream-events.ts
+node examples/01-stream-events.ts   # Node 24+ runs TypeScript directly
 ```
+
+They call the real API and spend real credits. On an older Node, run them with
+`npx tsx` — see [`examples/README.md`](examples/README.md).
 
 ## Message parameters
 
@@ -280,20 +320,36 @@ A 429 is not always the same problem — `error.scope` tells you which:
 `'organization'` and `'user'` mean a quota is exhausted and an admin must raise
 the plan limit.
 
+The SDK never retries on its own, because re-sending a message would start a
+second run. The [error handling guide](docs/errors.md) has the full reference and
+a retry policy you can copy.
+
 ## Costs are strings
 
 `cost.total`, `cost.input_cost` and `cost.output_cost` arrive as decimal
 **strings** and stay strings. Parsing them to `number` loses precision when you
 sum many of them; use a decimal library if you need to add them up.
 
-## Development
+## Versioning
+
+The SDK follows [semantic versioning](https://semver.org). While it is `0.x`, a
+minor release may include breaking changes; every one is listed in the
+[changelog](CHANGELOG.md).
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-pnpm --filter @cominty/sdk test     # vitest, fetch fully mocked — no network
-pnpm --filter @cominty/sdk build    # tsc -> dist (ESM + .d.ts)
-pnpm --filter @cominty/sdk check    # tsc --noEmit
+pnpm install
+pnpm test     # fetch is fully mocked — no network, no credits
+pnpm check    # type-check
+pnpm build    # compile to dist/
 ```
+
+Found a security problem? Please report it privately, as described in
+[SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)
