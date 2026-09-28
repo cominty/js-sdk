@@ -1,5 +1,5 @@
 {
-  "name": "@cominty/sdk",
+  "name": "@cominty-ai/sdk",
   "version": "0.1.0",
   "description": "Official TypeScript client for the Cominty managed agent chat API",
   "license": "MIT",

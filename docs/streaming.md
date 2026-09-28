@@ -109,7 +109,7 @@ Call `isKnownEvent` first. Besides skipping unfamiliar events, it is what lets
 TypeScript narrow `event.data` in each branch:
 
 ```ts
-import { isKnownEvent } from '@cominty/sdk'
+import { isKnownEvent } from '@cominty-ai/sdk'
 
 for await (const event of run) {
     if (!isKnownEvent(event)) continue
@@ -166,7 +166,7 @@ is still in progress on the server, and you can pick it up where you left off:
 `client.chat.stream` opens a new stream from that point.
 
 ```ts
-import { APIConnectionError, type AnyEvent, type Message } from '@cominty/sdk'
+import { APIConnectionError, type AnyEvent, type Message } from '@cominty-ai/sdk'
 
 async function streamWithResume(
     messageId: string,
@@ -202,7 +202,7 @@ If the server shuts down while a run is streaming, the stream throws
 `StreamInterrupted`. Its `partial` property is the message as far as it got:
 
 ```ts
-import { StreamInterrupted } from '@cominty/sdk'
+import { StreamInterrupted } from '@cominty-ai/sdk'
 
 try {
     console.log(await run.text())

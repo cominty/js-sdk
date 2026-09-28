@@ -19,7 +19,7 @@ const work = mkdtempSync(join(tmpdir(), 'cominty-sdk-smoke-'))
 
 const CONSUMER = `
 import assert from 'node:assert/strict'
-import { Cominty, ComintyError, InvalidParams, isKnownEvent } from '@cominty/sdk'
+import { Cominty, ComintyError, InvalidParams, isKnownEvent } from '@cominty-ai/sdk'
 
 const calls = []
 const client = new Cominty({

@@ -1,10 +1,10 @@
 # API reference
 
-Everything exported from `@cominty/sdk`. Every type on this page is importable by
+Everything exported from `@cominty-ai/sdk`. Every type on this page is importable by
 name:
 
 ```ts
-import { Cominty, type Message, type MessageParams } from '@cominty/sdk'
+import { Cominty, type Message, type MessageParams } from '@cominty-ai/sdk'
 ```
 
 - [`Cominty`](#cominty)
