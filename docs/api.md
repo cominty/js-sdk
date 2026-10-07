@@ -134,6 +134,11 @@ to the model plus the tools it picks, so one round can hold several tool calls.
 - **It is an order of magnitude, not an exact count.** It is checked after each
   round, so the agent can run `maxSteps + 1` of them, and each sub-agent has its
   own budget. It limits rounds, not tokens, cost or time.
+- **A very large value is not free.** `maxSteps: 999` lets the agent essentially
+  never hit the cap, but the organization's budget is checked once, when the
+  agent starts, and the cost is deducted only when it finishes. A long run on an
+  expensive model can go well past the budget you meant before anything stops
+  it.
 - The value is not stored and not returned. Keep it yourself if you need it.
 
 ### Memory namespace
@@ -152,6 +157,9 @@ namespace to read and write.
   it. To keep end users apart, put an identifier in the name, such as
   `support-bot-${userId}`. It is not a security boundary between agents either:
   any agent started with the name can read and write it.
+- **The older per-user platform memory is a namespace too:**
+  `${userId}::default`. Pass it to keep reading and writing those files;
+  [`memory.listNamespaces`](#memorylistnamespacesoptions) shows them.
 - At most 128 characters, never trimmed. Threads and messages do not echo it
   back, so keep the value you passed.
 

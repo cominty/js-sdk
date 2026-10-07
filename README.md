@@ -223,6 +223,11 @@ else that is not an integer `>= 1` throw `InvalidParams`.
 > order of magnitude rather than an exact count, and it limits rounds, not
 > tokens, cost or time.
 
+To let an agent essentially never hit the cap, pass a very large value such as
+`maxSteps: 999`. Do it with care: your budget is checked once, when the agent
+starts, and the cost is deducted only when it finishes — so a long run on an
+expensive model can go well past the budget you meant before anything stops it.
+
 ### Manage threads
 
 `client.threads` is scoped to the client's `userId` automatically.
@@ -300,6 +305,9 @@ Three things to know before you rely on it:
   put an identifier in the name — `support-bot-${userId}` — and don't treat a
   namespace as a secret between agents: any agent started with the name can read
   and write it.
+
+If you relied on the older per-user platform memory, it is still there under the
+namespace `${userId}::default` — `client.memory.listNamespaces()` shows them.
 
 And a few smaller ones: `namespace` is at most 128 characters and is never
 trimmed; `path` is at most one folder deep (`preferences/tone.md`, not
