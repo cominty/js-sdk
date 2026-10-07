@@ -1,6 +1,6 @@
 {
   "name": "@cominty-ai/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Official TypeScript client for the Cominty managed agent chat API",
   "license": "MIT",
   "author": "Cominty (https://cominty.ai)",

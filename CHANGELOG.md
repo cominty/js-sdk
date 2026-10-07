@@ -9,6 +9,8 @@ are always called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-07
+
 ### Added
 
 - `maxSteps` on `client.chat.start` and `client.chat.send`, a cap on the agent's
@@ -39,5 +41,6 @@ First public release.
 - Typed error hierarchy rooted at `ComintyError`.
 - Client-side parameter validation that reports every invalid argument at once.
 
-[Unreleased]: https://github.com/cominty/js-sdk/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cominty/js-sdk/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cominty/js-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cominty/js-sdk/releases/tag/v0.1.0
