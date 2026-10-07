@@ -73,9 +73,10 @@ describe('Cominty', () => {
         )
     })
 
-    it('exposes chat and threads resources', () => {
+    it('exposes chat, threads and memory resources', () => {
         const client = new Cominty({ apiToken: 'ck_live_test', userId: USER_ID, fetch })
         expect(client.chat).toBeDefined()
         expect(client.threads).toBeDefined()
+        expect(client.memory).toBeDefined()
     })
 })

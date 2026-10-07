@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Cominty } from '../client.ts'
 import { InvalidParams } from '../errors.ts'
+import type { StartChatParams } from '../models/chat.ts'
 import {
     AGENT_ID,
     assistantMessage,
@@ -145,5 +146,230 @@ describe('chat.send', () => {
         await expect(
             client(noCall).chat.send(THREAD_ID, { agentId: AGENT_ID, message: 'x'.repeat(30_001) }),
         ).rejects.toThrow(InvalidParams)
+    })
+})
+
+describe('maxSteps', () => {
+    it('is sent as options.max_steps by start', async () => {
+        const fetch = mockFetch([jsonResponse(startedThread())])
+        await client(fetch).chat.start({ agentId: AGENT_ID, message: 'Hello', maxSteps: 5 })
+        expect(fetch.calls[0]!.body).toEqual({
+            message: { content: 'Hello' },
+            options: { agent_id: AGENT_ID, user_id: USER_ID, max_steps: 5 },
+        })
+    })
+
+    it('is sent as options.max_steps by send', async () => {
+        const fetch = mockFetch([jsonResponse(assistantMessage())])
+        await client(fetch).chat.send(THREAD_ID, {
+            agentId: AGENT_ID,
+            message: 'Yes, continue.',
+            maxSteps: 999,
+        })
+        expect(fetch.calls[0]!.body).toEqual({
+            message: { content: 'Yes, continue.' },
+            options: { agent_id: AGENT_ID, user_id: USER_ID, max_steps: 999 },
+        })
+    })
+
+    it('accepts 1, the smallest cap', async () => {
+        const fetch = mockFetch([jsonResponse(startedThread())])
+        await client(fetch).chat.start({ agentId: AGENT_ID, message: 'Hello', maxSteps: 1 })
+        expect((fetch.calls[0]!.body as { options: object }).options).toHaveProperty('max_steps', 1)
+    })
+
+    it('is left out of the request when absent or undefined', async () => {
+        const fetch = mockFetch([
+            jsonResponse(startedThread()),
+            jsonResponse(startedThread()),
+            jsonResponse(assistantMessage()),
+        ])
+        const c = client(fetch)
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hello' })
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hello', maxSteps: undefined })
+        await c.chat.send(THREAD_ID, { agentId: AGENT_ID, message: 'Hello', maxSteps: undefined })
+
+        for (const call of fetch.calls) {
+            const { options } = call.body as { options: object }
+            expect(Object.keys(options)).toEqual(['agent_id', 'user_id'])
+        }
+    })
+
+    const invalid: [string, unknown][] = [
+        ['null', null],
+        ['zero', 0],
+        ['a negative integer', -3],
+        ['a fraction', 2.5],
+        ['NaN', Number.NaN],
+        ['Infinity', Number.POSITIVE_INFINITY],
+        ['a boolean', true],
+        ['a string', '5'],
+    ]
+
+    it.each(invalid)('rejects %s on start, with no request sent', async (_label, value) => {
+        const noCall = mockFetch([])
+        const error = await client(noCall)
+            .chat.start({ agentId: AGENT_ID, message: 'Hi', maxSteps: value as number })
+            .catch((e: unknown) => e)
+
+        expect(error).toBeInstanceOf(InvalidParams)
+        expect((error as InvalidParams).errors.map((e) => e.param)).toEqual(['maxSteps'])
+        expect(noCall.calls).toHaveLength(0)
+    })
+
+    it.each(invalid)('rejects %s on send, with no request sent', async (_label, value) => {
+        const noCall = mockFetch([])
+        const error = await client(noCall)
+            .chat.send(THREAD_ID, { agentId: AGENT_ID, message: 'Hi', maxSteps: value as number })
+            .catch((e: unknown) => e)
+
+        expect(error).toBeInstanceOf(InvalidParams)
+        expect((error as InvalidParams).errors.map((e) => e.param)).toEqual(['maxSteps'])
+        expect(noCall.calls).toHaveLength(0)
+    })
+
+    it('says what it got, and how to ask for the server default', async () => {
+        await expect(
+            client(mockFetch([])).chat.start({
+                agentId: AGENT_ID,
+                message: 'Hi',
+                maxSteps: Number.NaN,
+            }),
+        ).rejects.toThrow(
+            'maxSteps: must be an integer >= 1, or left out for the server default (got NaN)',
+        )
+    })
+})
+
+describe('memoryNamespace', () => {
+    it('is sent as options.memory_namespace by start', async () => {
+        const fetch = mockFetch([jsonResponse(startedThread())])
+        await client(fetch).chat.start({
+            agentId: AGENT_ID,
+            message: 'Hello',
+            maxSteps: 5,
+            memoryNamespace: 'brand-voice',
+        })
+        expect(fetch.calls[0]!.body).toEqual({
+            message: { content: 'Hello' },
+            options: {
+                agent_id: AGENT_ID,
+                user_id: USER_ID,
+                max_steps: 5,
+                memory_namespace: 'brand-voice',
+            },
+        })
+    })
+
+    it('is left out, never sent as null, when not given', async () => {
+        const fetch = mockFetch([jsonResponse(startedThread()), jsonResponse(startedThread())])
+        const c = client(fetch)
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hello' })
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hello', memoryNamespace: undefined })
+
+        for (const call of fetch.calls) {
+            const { options } = call.body as { options: object }
+            expect('memory_namespace' in options).toBe(false)
+        }
+    })
+
+    it('is not trimmed, and an empty one is sent as given', async () => {
+        const fetch = mockFetch([jsonResponse(startedThread()), jsonResponse(startedThread())])
+        const c = client(fetch)
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hello', memoryNamespace: '  padded ' })
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hello', memoryNamespace: '' })
+
+        const sent = fetch.calls.map(
+            (call) => (call.body as { options: { memory_namespace: string } }).options,
+        )
+        expect(sent[0]!.memory_namespace).toBe('  padded ')
+        expect(sent[1]!.memory_namespace).toBe('')
+    })
+
+    it('accepts 128 characters and rejects 129, before any request', async () => {
+        const fetch = mockFetch([jsonResponse(startedThread())])
+        const c = client(fetch)
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hi', memoryNamespace: 'n'.repeat(128) })
+        expect(fetch.calls).toHaveLength(1)
+
+        await expect(
+            c.chat.start({ agentId: AGENT_ID, message: 'Hi', memoryNamespace: 'n'.repeat(129) }),
+        ).rejects.toThrow('memoryNamespace: must be at most 128 characters, got 129')
+        expect(fetch.calls).toHaveLength(1)
+    })
+
+    it('counts characters as the API does: an emoji is one, not two', async () => {
+        const fetch = mockFetch([jsonResponse(startedThread())])
+        const c = client(fetch)
+        await c.chat.start({ agentId: AGENT_ID, message: 'Hi', memoryNamespace: '😀'.repeat(128) })
+        expect(fetch.calls).toHaveLength(1)
+
+        await expect(
+            c.chat.start({ agentId: AGENT_ID, message: 'Hi', memoryNamespace: '😀'.repeat(129) }),
+        ).rejects.toThrow(/got 129/)
+    })
+
+    it.each([
+        ['null', null],
+        ['a number', 7],
+    ])('rejects %s, with no request sent', async (_label, value) => {
+        const noCall = mockFetch([])
+        await expect(
+            client(noCall).chat.start({
+                agentId: AGENT_ID,
+                message: 'Hi',
+                memoryNamespace: value as unknown as string,
+            }),
+        ).rejects.toThrow(/memoryNamespace: must be a string/)
+        expect(noCall.calls).toHaveLength(0)
+    })
+
+    it('is refused by send: a thread keeps the namespace it was started with', async () => {
+        const noCall = mockFetch([])
+        await expect(
+            client(noCall).chat.send(THREAD_ID, {
+                agentId: AGENT_ID,
+                message: 'Follow up',
+                // @ts-expect-error -- the send params do not have it: the type refuses it too.
+                memoryNamespace: 'brand-voice',
+            }),
+        ).rejects.toThrow(/memoryNamespace: .*keeps the namespace it was started with/)
+        expect(noCall.calls).toHaveLength(0)
+    })
+
+    it('is refused by send even where TypeScript cannot see it', async () => {
+        // Start params reused for the follow-up type-check, structurally.
+        const params: StartChatParams = {
+            agentId: AGENT_ID,
+            message: 'Follow up',
+            memoryNamespace: 'brand-voice',
+            maxSteps: 0,
+        }
+        const noCall = mockFetch([])
+        const error = await client(noCall)
+            .chat.send(THREAD_ID, params)
+            .catch((e: unknown) => e)
+
+        expect(error).toBeInstanceOf(InvalidParams)
+        // Named together with the other offending argument, in one pass.
+        expect((error as InvalidParams).errors.map((e) => e.param)).toEqual([
+            'maxSteps',
+            'memoryNamespace',
+        ])
+        expect(noCall.calls).toHaveLength(0)
+    })
+
+    it('lets send through when it is explicitly undefined', async () => {
+        const fetch = mockFetch([jsonResponse(assistantMessage())])
+        const params: StartChatParams = {
+            agentId: AGENT_ID,
+            message: 'Follow up',
+            memoryNamespace: undefined,
+        }
+        await client(fetch).chat.send(THREAD_ID, params)
+        expect(fetch.calls[0]!.body).toEqual({
+            message: { content: 'Follow up' },
+            options: { agent_id: AGENT_ID, user_id: USER_ID },
+        })
     })
 })

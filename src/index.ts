@@ -75,7 +75,16 @@ export {
     type UpdateThreadParams,
 } from './models/chat.ts'
 
+export type {
+    CreateMemoryFileParams,
+    ListMemoryFilesParams,
+    MemoryFile,
+    MemoryFileSummary,
+    UpdateMemoryFileParams,
+} from './models/memory.ts'
+
 export { AssistantRun, StartedChat } from './streaming.ts'
 export type { ListThreadsParams } from './resources/threads.ts'
 export type { ChatResource } from './resources/chat.ts'
+export type { MemoryResource } from './resources/memory.ts'
 export type { ThreadsResource } from './resources/threads.ts'

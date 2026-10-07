@@ -100,6 +100,20 @@ export function startedThread(overrides: Record<string, unknown> = {}) {
     }
 }
 
+export function memoryFile(overrides: Record<string, unknown> = {}) {
+    return {
+        path: 'tone.md',
+        namespace: 'brand-voice',
+        purpose: 'writing style',
+        content: 'Keep it casual.',
+        created_at: '2026-09-14T10:00:00Z',
+        updated_at: '2026-09-14T10:00:00Z',
+        // The `+` matters: sent unencoded in a query, it would arrive as a space.
+        version: '2026-09-14T10:00:00.123456+00:00',
+        ...overrides,
+    }
+}
+
 /** One progress event line, newline-terminated. */
 export function eventLine(name: string, over: Record<string, unknown> = {}): string {
     return `${JSON.stringify({

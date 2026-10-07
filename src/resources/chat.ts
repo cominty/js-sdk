@@ -51,6 +51,9 @@ export class ChatResource {
      * Unlike `start`, this endpoint returns the new assistant message directly
      * rather than the whole thread, so the returned run has no `.thread`; you
      * already hold the `threadId`, and `threads.get(threadId)` fetches the rest.
+     *
+     * `maxSteps` is per message: pass it again to keep a cap. `memoryNamespace` is
+     * not taken here — a thread keeps the one it was started with.
      */
     async send(threadId: string, params: MessageParams): Promise<AssistantRun> {
         const body = buildChatBody(params, this.#userId, 'chat.send')

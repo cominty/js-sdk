@@ -66,6 +66,7 @@ Two kinds of error are deliberately **not** `ComintyError`:
 | `chat.stream` | Nothing — it makes no request until the run is consumed |
 | Iterating a run, `run.result()`, `run.text()`, `run.questions()` | `APIError`, `APIConnectionError`, `StreamInterrupted`, `SDKError` |
 | `threads.*` | `APIError`, `APIConnectionError` |
+| `memory.*` | `InvalidParams`, `APIError`, `APIConnectionError` |
 
 Note that a run can fail **while streaming**, after `chat.start` has already
 succeeded. Wrap the code that consumes the run, not just the call that creates
@@ -91,8 +92,8 @@ request worked, the agent did not. Check `status` on the result of
 | --- | --- | --- |
 | `AuthError` | 401 | Missing, mistyped or revoked API key |
 | `PermissionError` | 403 | The key is valid but may not access this resource |
-| `NotFoundError` | 404 | Wrong thread, message or agent id |
-| `ConflictError` | 409 | The request conflicts with the resource's current state |
+| `NotFoundError` | 404 | Wrong thread, message or agent id; a memory file that is not in the namespace |
+| `ConflictError` | 409 | The request conflicts with the resource's current state — for a memory file, a path that already exists or a stale `version` |
 | `RateLimitError` | 429 | See [Rate limits](#rate-limits) |
 | `ServerError` | 5xx | A problem on Cominty's side; usually worth retrying |
 | `APIError` | other 4xx | Anything without a dedicated class |
@@ -138,8 +139,9 @@ than start over.
 
 ## Invalid parameters
 
-`chat.start` and `chat.send` validate their arguments before sending anything.
-`InvalidParams` lists every problem at once, not just the first:
+`chat.start`, `chat.send` and the `client.memory` methods validate their
+arguments before sending anything. `InvalidParams` lists every problem at once,
+not just the first:
 
 ```ts
 import { InvalidParams } from '@cominty-ai/sdk'
@@ -159,6 +161,13 @@ try {
 
 Each entry has `param`, `message` and, where useful, the offending `input`.
 
+Some values are refused here because the API would not complain about them:
+`memoryNamespace` on `chat.send` (the API ignores it — a thread keeps the
+namespace it was started with) and a `null` `content` or `purpose` on
+`memory.update` (the API ignores it and still answers 200). A malformed
+`version` is the opposite case: the SDK does not inspect it, so it comes back as
+a 422 `APIError`.
+
 ## Retrying
 
 The SDK does **not** retry on its own. Sending a message is not idempotent —
@@ -172,7 +181,8 @@ A reasonable policy:
 | `RateLimitError` with scope `'concurrency'` or `null` | Yes, after a delay |
 | `RateLimitError` with scope `'user'` or `'organization'` | Not until `resetAt` |
 | `ServerError` | Yes, with backoff |
-| `APIConnectionError` on a read (`threads.list`, `threads.get`) | Yes |
+| `APIConnectionError` on a read (`threads.list`, `threads.get`, `memory.list`, `memory.get`) | Yes |
+| `ConflictError` on `memory.update` | Read the file again, then retry with its new `version` |
 | `APIConnectionError` on `chat.start` / `chat.send` | Carefully — the message may have been accepted |
 | `APIConnectionError` while streaming | [Resume the stream](streaming.md#resuming-a-dropped-stream) instead |
 | `AuthError`, `PermissionError`, `NotFoundError`, `InvalidParams` | No — fix the request |

@@ -157,13 +157,19 @@ export class InvalidParams extends ComintyError {
     readonly errors: InvalidParam[]
     constructor(context: string, errors: InvalidParam[]) {
         const lines = errors.map((e) => {
-            const got =
-                'input' in e && e.input !== undefined ? ` (got ${JSON.stringify(e.input)})` : ''
+            const got = 'input' in e && e.input !== undefined ? ` (got ${show(e.input)})` : ''
             return `  - ${e.param}: ${e.message}${got}`
         })
         super(`Invalid parameters for ${context}:\n${lines.join('\n')}`)
         this.errors = errors
     }
+}
+
+/** `JSON.stringify` alone reports `NaN` and `Infinity` as `null`, and throws on a bigint. */
+function show(input: unknown): string {
+    if (typeof input === 'number') return String(input)
+    if (typeof input === 'bigint') return `${input}n`
+    return JSON.stringify(input)
 }
 
 /** A bug inside the SDK. Should never reach users. */

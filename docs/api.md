@@ -11,7 +11,8 @@ import { Cominty, type Message, type MessageParams } from '@cominty-ai/sdk'
 - [`client.chat`](#clientchat) — [`start`](#chatstartparams) · [`send`](#chatsendthreadid-params) · [`stream`](#chatstreammessageid-options)
 - [`AssistantRun`](#assistantrun)
 - [`client.threads`](#clientthreads) — [`list`](#threadslistparams) · [`get`](#threadsgetthreadid-options) · [`update`](#threadsupdatethreadid-params) · [`archive`](#threadsarchivethreadid-options)
-- [Data types](#data-types) — [`Message`](#message) · [`Thread`](#thread-and-threadsummary) · [`Question`](#question) · [`ConversationFile`](#conversationfile)
+- [`client.memory`](#clientmemory) — [`list`](#memorylistparams) · [`listNamespaces`](#memorylistnamespacesoptions) · [`create`](#memorycreateparams) · [`get`](#memorygetpath-options) · [`update`](#memoryupdatepath-params) · [`delete`](#memorydeletepath-options)
+- [Data types](#data-types) — [`Message`](#message) · [`Thread`](#thread-and-threadsummary) · [`Question`](#question) · [`ConversationFile`](#conversationfile) · [`MemoryFile`](#memoryfile-and-memoryfilesummary)
 - [Events](#events)
 - [Errors](#errors)
 - [Helpers and constants](#helpers-and-constants)
@@ -51,6 +52,7 @@ malformed, or if constructed in a browser without `dangerouslyAllowBrowser`.
 | --- | --- | --- |
 | `chat` | `ChatResource` | Start and continue conversations |
 | `threads` | `ThreadsResource` | List and manage threads |
+| `memory` | `MemoryResource` | Read and write memory files |
 | `userId` | `string` | The user every request acts on behalf of |
 | `baseUrl` | `string` | The resolved API base URL |
 | `close()` | `void` | Abort every in-flight request and stream |
@@ -98,6 +100,7 @@ hold the thread id.
 | `sourceIds` | `number[]` | Restrict retrieval to these knowledge sources. |
 | `documentIds` | `string[]` | Restrict retrieval to these documents. |
 | `disabledTools` | `DisablableTool[]` | Tools to turn off for this message. |
+| `maxSteps` | `number` | Cap on tool rounds for this message. An integer `>= 1`. See [Capping tool rounds](#capping-tool-rounds). |
 | `signal` | `AbortSignal` | Cancels the request and the run's stream. |
 
 `StartChatParams` adds:
@@ -105,12 +108,52 @@ hold the thread id.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `name` | `string` | A name for the new thread. |
+| `memoryNamespace` | `string` | The thread's memory namespace. At most 128 characters. See [Memory namespace](#memory-namespace). |
 
 `DisablableTool` is `'web'`, `'company_documents'`, `'mcp:<server>'` for one MCP
 server, or `'mcp:*'` for all of them.
 
 Invalid arguments throw [`InvalidParams`](errors.md#invalid-parameters) before
 any request is sent.
+
+### Capping tool rounds
+
+`maxSteps` caps the agent's tool rounds for **one message**. A round is one call
+to the model plus the tools it picks, so one round can hold several tool calls.
+
+- **Per message, not per thread.** A follow-up without `maxSteps` runs with the
+  server default again, whatever the previous message used. Pass it on every
+  call to keep a cap.
+- **Left out, the server default applies** — 60 today, and it may change. There
+  is no "unlimited" and no upper bound: `null`, `0`, a negative number, a
+  fraction, `NaN`, `Infinity`, a boolean or a string throws `InvalidParams`.
+- **Reaching the cap is not an error.** The agent stops using tools, writes a
+  short recap and asks whether to continue; the message ends with
+  `status: 'success'`. No field, event or error code says the cap was reached,
+  and the wording is the model's, so do not parse it. Continue with `chat.send`.
+- **It is an order of magnitude, not an exact count.** It is checked after each
+  round, so the agent can run `maxSteps + 1` of them, and each sub-agent has its
+  own budget. It limits rounds, not tokens, cost or time.
+- The value is not stored and not returned. Keep it yourself if you need it.
+
+### Memory namespace
+
+`memoryNamespace` gives a thread the [memory files](#clientmemory) of one
+namespace to read and write.
+
+- **Fixed when the thread starts.** The thread keeps it for life. `chat.send`
+  does not take it, and passing it there throws `InvalidParams` rather than
+  being dropped. Start a new thread to use another namespace.
+- **Left out, the thread may have no memory.** It uses the namespace set on the
+  agent, if there is one. Otherwise it runs with no memory tools at all, and no
+  error, field or event says so. A value you pass wins over the agent's; you
+  cannot force "no memory" on an agent that has a namespace.
+- **Shared by the whole organization.** The client's `userId` is not part of
+  it. To keep end users apart, put an identifier in the name, such as
+  `support-bot-${userId}`. It is not a security boundary between agents either:
+  any agent started with the name can read and write it.
+- At most 128 characters, never trimmed. Threads and messages do not echo it
+  back, so keep the value you passed.
 
 ### `chat.stream(messageId, options?)`
 
@@ -209,6 +252,122 @@ Archive a thread. This is a soft delete.
 
 ---
 
+## `client.memory`
+
+Files an agent can read back later. A file is identified by its **namespace** —
+a name you choose — and its path, so the same path in two namespaces is two
+files. There is no call to create or delete a namespace: its first file creates
+it, and deleting its last file removes it.
+
+Memory belongs to the namespace, not to a user: these calls do not send the
+client's `userId`, and a namespace is shared by the whole organization. See
+[Memory namespace](#memory-namespace) for attaching one to a thread.
+
+Checked before any request, with [`InvalidParams`](errors.md#invalid-parameters):
+
+- `namespace` is a string of at most 128 characters. It is never trimmed, and an
+  empty one is sent as given. It is required everywhere but `list`.
+- `path` is at most one folder deep: `tone.md` and `preferences/tone.md` are
+  fine, `a/b/tone.md` is not.
+
+The limits on `purpose` (1 to 100 characters once trimmed) and `content` (1 MiB)
+are the API's, and come back as an `APIError`.
+
+### `memory.list(params?)`
+
+```ts
+list(params?: ListMemoryFilesParams): Promise<MemoryFileSummary[]>
+```
+
+File summaries — no `content` — most recently updated first.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `namespace` | `string` | Keep one namespace. Left out, every file the API key can see. |
+| `signal` | `AbortSignal` | Cancels the request. |
+
+Without `namespace`, the same path can appear once per namespace, so key a file
+by both.
+
+### `memory.listNamespaces(options?)`
+
+```ts
+listNamespaces(options?: { signal?: AbortSignal }): Promise<string[]>
+```
+
+The names that hold at least one file, in no particular order.
+
+### `memory.create(params)`
+
+```ts
+create(params: CreateMemoryFileParams): Promise<MemoryFile>
+```
+
+Create a file. Throws `ConflictError` if the path already exists in the
+namespace.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `string` | **Required.** At most one folder deep. |
+| `namespace` | `string` | **Required.** The namespace the file goes in. |
+| `purpose` | `string` | **Required.** Why the file exists. The agent reads it. |
+| `content` | `string` | **Required.** The file's body. May be empty. |
+| `signal` | `AbortSignal` | Cancels the request. |
+
+### `memory.get(path, options)`
+
+```ts
+get(path: string, options: { namespace: string; signal?: AbortSignal }): Promise<MemoryFile>
+```
+
+One file, with its content. Throws `NotFoundError` if the path is not in the
+namespace.
+
+### `memory.update(path, params)`
+
+```ts
+update(path: string, params: UpdateMemoryFileParams): Promise<MemoryFile>
+```
+
+Change a file's content and/or purpose. Only the fields you pass change, and at
+least one is required.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `namespace` | `string` | **Required.** The namespace the file is in. |
+| `version` | `string` | **Required.** The `version` from your last read of the file, unchanged. |
+| `content` | `string` | New body. |
+| `purpose` | `string` | New purpose. |
+| `signal` | `AbortSignal` | Cancels the request. |
+
+`version` is an opaque token: never parse or compare it. A stale one throws
+`ConflictError` — read the file again and retry with the version it returns. A
+malformed one is not caught locally; the API answers 422, an `APIError`.
+
+A field cannot be cleared. The API would ignore a `null` and still answer 200,
+so `content: null` or `purpose: null` throws `InvalidParams` instead.
+
+```ts
+const file = await client.memory.get('tone.md', { namespace })
+const updated = await client.memory.update('tone.md', {
+    namespace,
+    version: file.version,
+    content: 'Keep it upbeat.',
+})
+// The next write must use updated.version.
+```
+
+### `memory.delete(path, options)`
+
+```ts
+delete(path: string, options: { namespace: string; signal?: AbortSignal }): Promise<void>
+```
+
+Delete a file. Not idempotent: a path that is already gone throws
+`NotFoundError`.
+
+---
+
 ## Data types
 
 Response types are open-ended: the API may return fields that are not listed
@@ -265,6 +424,21 @@ Answer by sending one of the options, or any free text, with `chat.send`.
 
 `ShareLink` has `id`, `url`, `created_at`, `expires_at`, `last_accessed_at`,
 `access_count`, `revoked`, `expired` and `protected`.
+
+### `MemoryFile` and `MemoryFileSummary`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `path` | `string` | |
+| `namespace` | `string` | The namespace the file is in, as you named it |
+| `purpose` | `string` | Why the file exists |
+| `content` | `string` | The file's body — **`MemoryFile` only** |
+| `created_at` | `string` | ISO-8601 timestamp |
+| `updated_at` | `string` | ISO-8601 timestamp |
+| `version` | `string` | Opaque token to pass back to `memory.update` |
+
+Supporting types: `ListMemoryFilesParams`, `CreateMemoryFileParams`,
+`UpdateMemoryFileParams`.
 
 ---
 

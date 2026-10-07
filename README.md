@@ -190,6 +190,39 @@ const reply = await client.chat.send(run.thread.id, { agentId, message: 'Tomorro
 console.log(await reply.text())
 ```
 
+### Cap the agent's tool rounds
+
+`maxSteps` limits how many tool rounds — one call to the model plus the tools it
+picks — the agent may run for **one message**. Reaching the cap is not an error:
+the agent stops using tools, recaps, and asks whether to continue, and the
+message ends with `status: 'success'`. Continue with a normal follow-up.
+
+```ts
+const run = await client.chat.start({
+    agentId,
+    message: 'Research X, then write it up.',
+    maxSteps: 5,
+})
+await run.text()
+
+// The cap is per message, not per thread: pass it again to keep it.
+const reply = await client.chat.send(run.thread.id, {
+    agentId,
+    message: 'Yes, continue.',
+    maxSteps: 10,
+})
+console.log(await reply.text())
+```
+
+Leave `maxSteps` out and the server default applies — 60 today, on every message
+that does not carry its own. There is no "unlimited": `null`, `0` and anything
+else that is not an integer `>= 1` throw `InvalidParams`.
+
+> Nothing flags that the cap was reached — no field, no event, no error code —
+> and the reply's wording is the model's, so don't parse it. The cap is also an
+> order of magnitude rather than an exact count, and it limits rounds, not
+> tokens, cost or time.
+
 ### Manage threads
 
 `client.threads` is scoped to the client's `userId` automatically.
@@ -206,6 +239,74 @@ const thread = await client.threads.get(threadId)   // full message history
 await client.threads.update(threadId, { name: 'Renamed', starred: true })
 await client.threads.archive(threadId)              // soft-delete
 ```
+
+### Memory files
+
+`client.memory` stores files an agent can read back later. Each file lives in a
+**namespace** — a name you choose — and is identified by its namespace and its
+path. Nothing creates a namespace: the first file you put in one does.
+
+```ts
+const namespace = 'support-bot'
+
+// `namespace` is required on every call but `list` and `listNamespaces`.
+let file = await client.memory.create({
+    path: 'tone.md',
+    namespace,
+    purpose: 'writing style',   // why the file exists — the agent reads it
+    content: 'Keep it casual.',
+})
+
+// Summaries, without `content`. Leave `namespace` out to list every file the
+// API key can see.
+for (const f of await client.memory.list({ namespace })) {
+    console.log(f.path, f.purpose, f.version)
+}
+await client.memory.listNamespaces()                 // names holding at least one file
+
+file = await client.memory.get('tone.md', { namespace })
+
+// Partial update: only what you pass changes. `version` is the one from your
+// last read — a stale one throws ConflictError (409).
+file = await client.memory.update('tone.md', {
+    namespace,
+    version: file.version,
+    content: 'Keep it upbeat.',
+})
+
+await client.memory.delete('tone.md', { namespace })
+```
+
+To let an agent use the files, start the thread in their namespace:
+
+```ts
+const run = await client.chat.start({
+    agentId,
+    message: 'Use the tone file.',
+    memoryNamespace: namespace,
+})
+```
+
+Three things to know before you rely on it:
+
+- **The namespace is fixed when the thread starts.** The thread keeps it for
+  life, and `chat.send` does not take `memoryNamespace` — passing it throws
+  `InvalidParams`. Start a new thread to use another one.
+- **A thread with no namespace has no memory.** Without `memoryNamespace`, a
+  thread uses the namespace set on its agent, if there is one; otherwise it runs
+  with no memory tools at all, and no error, field or event says so.
+- **A namespace is shared by the whole organization.** The client's `userId` is
+  not part of it, and memory calls do not send it. To keep your end users apart,
+  put an identifier in the name — `support-bot-${userId}` — and don't treat a
+  namespace as a secret between agents: any agent started with the name can read
+  and write it.
+
+And a few smaller ones: `namespace` is at most 128 characters and is never
+trimmed; `path` is at most one folder deep (`preferences/tone.md`, not
+`a/b/tone.md`); `content` may be empty; `version` is an opaque token to pass back
+unchanged; `update` cannot clear a field, so `null` throws `InvalidParams`; and
+`delete` is not idempotent — a path already gone throws `NotFoundError`. The
+[API reference](docs/api.md#clientmemory) has every method.
 
 ### Reattach to a run in flight
 
@@ -232,6 +333,8 @@ Runnable scripts live in [`examples/`](examples/):
 | [`04-answer-questions.ts`](examples/04-answer-questions.ts) | Read and answer agent questions |
 | [`05-list-threads.ts`](examples/05-list-threads.ts) | List and search threads |
 | [`06-manage-thread.ts`](examples/06-manage-thread.ts) | Get, rename/star, archive |
+| [`07-max-steps.ts`](examples/07-max-steps.ts) | Cap tool rounds for one message, then continue past the cap |
+| [`08-memory-files.ts`](examples/08-memory-files.ts) | Create, list, update and delete memory files; start a thread in their namespace |
 
 ```bash
 git clone https://github.com/cominty/js-sdk.git && cd js-sdk
@@ -255,6 +358,8 @@ Both `chat.start` and `chat.send` accept:
 | `sourceIds` | `number[]` | Restrict retrieval to specific knowledge sources. |
 | `documentIds` | `string[]` | Restrict retrieval to specific documents. |
 | `disabledTools` | `DisablableTool[]` | Turn tools off: `'web'`, `'company_documents'`, `'mcp:<server>'`, or `'mcp:*'`. |
+| `memoryNamespace` | `string` | `start` only — the thread's memory namespace (max 128 chars), fixed for its whole life. |
+| `maxSteps` | `number` | Cap on tool rounds for **this message** (integer `>= 1`). Per message, not per thread; left out, the server default applies (60 today). |
 | `signal` | `AbortSignal` | Cancel the request. |
 
 Invalid values throw `InvalidParams` **before** any request is sent, naming every

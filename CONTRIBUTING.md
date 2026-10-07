@@ -47,7 +47,7 @@ src/
 ├── events.ts        Stream event types
 ├── errors.ts        Error hierarchy
 ├── models/          Request/response types, validation, camelCase → snake_case mapping
-└── resources/       client.chat and client.threads
+└── resources/       client.chat, client.threads and client.memory
 ```
 
 ## Guidelines

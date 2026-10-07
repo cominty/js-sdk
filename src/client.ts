@@ -3,6 +3,7 @@
 import { type ComintyOptions, resolveConfig } from './config.ts'
 import { validateUserId } from './models/chat.ts'
 import { ChatResource } from './resources/chat.ts'
+import { MemoryResource } from './resources/memory.ts'
 import { ThreadsResource } from './resources/threads.ts'
 import { Transport } from './transport.ts'
 
@@ -32,6 +33,7 @@ import { Transport } from './transport.ts'
 export class Cominty {
     readonly chat: ChatResource
     readonly threads: ThreadsResource
+    readonly memory: MemoryResource
 
     readonly #transport: Transport
     readonly #userId: string
@@ -52,6 +54,7 @@ export class Cominty {
         this.#transport = new Transport(config)
         this.chat = new ChatResource(this.#transport, config.userId)
         this.threads = new ThreadsResource(this.#transport, config.userId)
+        this.memory = new MemoryResource(this.#transport)
     }
 
     /** The end-user id every request is made on behalf of. */

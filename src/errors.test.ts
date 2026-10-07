@@ -4,6 +4,7 @@ import {
     AuthError,
     ConflictError,
     errorFromResponse,
+    InvalidParams,
     NotFoundError,
     PermissionError,
     RateLimitError,
@@ -87,5 +88,28 @@ describe('RateLimitError', () => {
     it('reports no scope when the server says nothing useful', () => {
         expect((errorFromResponse(429, null) as RateLimitError).scope).toBeNull()
         expect((errorFromResponse(429, null) as RateLimitError).retryAfter).toBeNull()
+    })
+})
+
+describe('InvalidParams', () => {
+    const got = (input: unknown) =>
+        new InvalidParams('chat.start', [
+            { param: 'maxSteps', message: 'must be an integer', input },
+        ]).message
+
+    it('names the call, the argument and the bad value', () => {
+        expect(got('5')).toBe(
+            'Invalid parameters for chat.start:\n  - maxSteps: must be an integer (got "5")',
+        )
+    })
+
+    it('shows NaN and Infinity as themselves, where JSON would say null', () => {
+        expect(got(Number.NaN)).toContain('(got NaN)')
+        expect(got(Number.POSITIVE_INFINITY)).toContain('(got Infinity)')
+        expect(got(null)).toContain('(got null)')
+    })
+
+    it('survives a bigint, which JSON cannot serialize', () => {
+        expect(got(5n)).toContain('(got 5n)')
     })
 })

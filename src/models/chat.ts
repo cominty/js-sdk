@@ -11,6 +11,7 @@
  */
 
 import { InvalidParams, SDKError, type InvalidParam } from '../errors.ts'
+import { checkNamespace } from './memory.ts'
 
 /** Max content length, enforced server-side (`CHAT_MESSAGE_MAX_LENGTH`). */
 export const CONTENT_MAX_LENGTH = 30_000
@@ -132,13 +133,24 @@ export interface MessageParams {
     documentIds?: string[]
     /** Turn tools off for this message. */
     disabledTools?: DisablableTool[]
+    /**
+     * Cap on the agent's tool rounds for this message only: an integer `>= 1`.
+     * Leave it out to use the server default.
+     */
+    maxSteps?: number
     /** Abort the request. */
     signal?: AbortSignal
 }
 
-/** `chat.start` additionally names the new thread. */
+/** `chat.start` additionally names the new thread and picks its memory namespace. */
 export interface StartChatParams extends MessageParams {
     name?: string
+    /**
+     * The memory namespace the thread reads and writes, fixed for its whole life.
+     * Max 128 characters. Leave it out and the thread has no memory, unless the
+     * agent has a namespace of its own.
+     */
+    memoryNamespace?: string
 }
 
 export interface UpdateThreadParams {
@@ -158,7 +170,7 @@ interface ChatBody {
         document_ids?: string[]
         disabled_tools?: string[]
     }
-    options: { agent_id: string; user_id: string }
+    options: { agent_id: string; user_id: string; max_steps?: number; memory_namespace?: string }
 }
 
 /**
@@ -167,7 +179,11 @@ interface ChatBody {
  * `userId` comes from the client, never the caller — it is set once and applied
  * to every request, exactly as in the Python SDK.
  */
-export function buildChatBody(params: StartChatParams, userId: string, context: string): ChatBody {
+export function buildChatBody(
+    params: StartChatParams,
+    userId: string,
+    context: 'chat.start' | 'chat.send',
+): ChatBody {
     const errors: InvalidParam[] = []
 
     if (typeof params.agentId !== 'string' || params.agentId.length === 0) {
@@ -236,6 +252,29 @@ export function buildChatBody(params: StartChatParams, userId: string, context: 
         }
     }
 
+    // There is no "unlimited": `null`, `0` and `Infinity` are refused like any other.
+    if (
+        params.maxSteps !== undefined &&
+        !(Number.isInteger(params.maxSteps) && params.maxSteps >= 1)
+    ) {
+        errors.push({
+            param: 'maxSteps',
+            message: 'must be an integer >= 1, or left out for the server default',
+            input: params.maxSteps,
+        })
+    }
+    if (context === 'chat.start') {
+        checkNamespace(errors, 'memoryNamespace', params.memoryNamespace)
+    } else if (params.memoryNamespace !== undefined) {
+        // The API ignores it on a follow-up. Say so rather than drop it silently.
+        errors.push({
+            param: 'memoryNamespace',
+            message:
+                'not accepted on a follow-up. A thread keeps the namespace it was started ' +
+                'with: leave it out, or start a new thread to use another',
+        })
+    }
+
     if (errors.length > 0) throw new InvalidParams(context, errors)
 
     // `exclude_none` equivalent: omitted keys rather than explicit nulls.
@@ -245,7 +284,11 @@ export function buildChatBody(params: StartChatParams, userId: string, context: 
     if (params.documentIds !== undefined) message.document_ids = params.documentIds
     if (params.disabledTools !== undefined) message.disabled_tools = params.disabledTools
 
-    const body: ChatBody = { message, options: { agent_id: params.agentId, user_id: userId } }
+    const options: ChatBody['options'] = { agent_id: params.agentId, user_id: userId }
+    if (params.maxSteps !== undefined) options.max_steps = params.maxSteps
+    if (params.memoryNamespace !== undefined) options.memory_namespace = params.memoryNamespace
+
+    const body: ChatBody = { message, options }
     if (params.name !== undefined) body.name = params.name
     return body
 }

@@ -9,6 +9,20 @@ are always called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+- `maxSteps` on `client.chat.start` and `client.chat.send`, a cap on the agent's
+  tool rounds for one message.
+- `memoryNamespace` on `client.chat.start`, the memory namespace the thread reads
+  and writes for its whole life.
+- `client.memory.list`, `listNamespaces`, `create`, `get`, `update` and `delete`,
+  for the memory files in a namespace.
+
+### Fixed
+
+- `InvalidParams` reported a `NaN` or `Infinity` argument as `null`, and threw a
+  `TypeError` instead when given a `bigint`.
+
 ## [0.1.0] - 2026-09-28
 
 First public release.
