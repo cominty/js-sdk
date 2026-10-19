@@ -9,6 +9,42 @@ are always called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-19
+
+### Added
+
+- `threadCapabilities` on `client.chat.start`: overrides the agent's `web`,
+  `indexedDocuments`, `mcp`, `skills`, `imageGeneration`, `videoGeneration`,
+  `musicGeneration` and `memory` capabilities for the thread's whole life. Sent
+  as `options.capabilities`.
+- `messageScope` on `client.chat.start` and `client.chat.send`: turns
+  capabilities on or off, or narrows their allowlists, for one message. Sent as
+  `message.scope`.
+- `ALL` (`'*'`), the "no restriction" filter, and the `AgentCapabilities`,
+  `MessageScope` and related types.
+- `client.chat.cancel(messageId)`, to stop an assistant message that is still
+  being generated.
+- `client.chat.export(messageId, { format })`, returning a finished message as
+  PDF or DOCX bytes.
+- `client.chat.uploadFile(file, { filename, mimetype })`, the whole presigned
+  upload of a `Blob`, `File`, `ArrayBuffer` or `Uint8Array`, returning the
+  `ConversationFile` whose `id` goes in `fileIds`; and
+  `client.chat.downloadFile(fileId)`, returning a conversation file's bytes. The
+  API key is never sent to the storage backend. `UPLOAD_MAX_BYTES` is the 500 MiB
+  limit.
+- `InvalidParams` for `threadCapabilities` on `chat.send`, `messageScope`
+  together with `sourceIds`, `documentIds` or `disabledTools`, and
+  `memoryNamespace` together with `threadCapabilities.memory`.
+
+### Deprecated
+
+- `sourceIds`, `documentIds` and `disabledTools` on `chat.start` and
+  `chat.send`, with `DisablableTool`, `DISABLE_MCP_PREFIX` and `DISABLE_ALL_MCP`:
+  use `messageScope`. They still work on their own.
+- `memoryNamespace` on `chat.start`: use
+  `threadCapabilities: { memory: { activation: 'always', namespace } }`. It still
+  works on its own.
+
 ## [0.2.0] - 2026-10-07
 
 ### Added
@@ -41,6 +77,7 @@ First public release.
 - Typed error hierarchy rooted at `ComintyError`.
 - Client-side parameter validation that reports every invalid argument at once.
 
-[Unreleased]: https://github.com/cominty/js-sdk/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cominty/js-sdk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cominty/js-sdk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cominty/js-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cominty/js-sdk/releases/tag/v0.1.0
