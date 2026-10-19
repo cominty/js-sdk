@@ -8,7 +8,8 @@ import { Cominty, type Message, type MessageParams } from '@cominty-ai/sdk'
 ```
 
 - [`Cominty`](#cominty)
-- [`client.chat`](#clientchat) — [`start`](#chatstartparams) · [`send`](#chatsendthreadid-params) · [`stream`](#chatstreammessageid-options)
+- [`client.chat`](#clientchat) — [`start`](#chatstartparams) · [`send`](#chatsendthreadid-params) · [`stream`](#chatstreammessageid-options) · [`cancel`](#chatcancelmessageid-options) · [`export`](#chatexportmessageid-params) · [`uploadFile`](#chatuploadfilefile-params) · [`downloadFile`](#chatdownloadfilefileid-options)
+- [Capabilities and message scope](#capabilities-and-message-scope) — [`AgentCapabilities`](#agentcapabilities) · [`MessageScope`](#messagescope)
 - [`AssistantRun`](#assistantrun)
 - [`client.threads`](#clientthreads) — [`list`](#threadslistparams) · [`get`](#threadsgetthreadid-options) · [`update`](#threadsupdatethreadid-params) · [`archive`](#threadsarchivethreadid-options)
 - [`client.memory`](#clientmemory) — [`list`](#memorylistparams) · [`listNamespaces`](#memorylistnamespacesoptions) · [`create`](#memorycreateparams) · [`get`](#memorygetpath-options) · [`update`](#memoryupdatepath-params) · [`delete`](#memorydeletepath-options)
@@ -96,10 +97,11 @@ hold the thread id.
 | --- | --- | --- |
 | `agentId` | `string` | **Required.** The agent to run. |
 | `message` | `string` | **Required.** The user's message. At most 30,000 characters. |
-| `fileIds` | `string[]` | Previously uploaded files to attach. At most 5. |
-| `sourceIds` | `number[]` | Restrict retrieval to these knowledge sources. |
-| `documentIds` | `string[]` | Restrict retrieval to these documents. |
-| `disabledTools` | `DisablableTool[]` | Tools to turn off for this message. |
+| `fileIds` | `string[]` | Ids from [`chat.uploadFile`](#chatuploadfilefile-params) to attach. At most 5. |
+| `messageScope` | [`MessageScope`](#messagescope) | Turn capabilities on or off, or narrow them, for this message only. Sent as `message.scope`. |
+| `sourceIds` | `number[]` | **Deprecated:** use `messageScope.indexedDocuments.sourceIds`. Restrict retrieval to these knowledge sources. |
+| `documentIds` | `string[]` | **Deprecated:** use `messageScope.indexedDocuments.documentIds`. Restrict retrieval to these documents. |
+| `disabledTools` | `DisablableTool[]` | **Deprecated:** turn tools off with `messageScope`. Tools to turn off for this message. |
 | `maxSteps` | `number` | Cap on tool rounds for this message. An integer `>= 1`. See [Capping tool rounds](#capping-tool-rounds). |
 | `signal` | `AbortSignal` | Cancels the request and the run's stream. |
 
@@ -108,13 +110,23 @@ hold the thread id.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `name` | `string` | A name for the new thread. |
-| `memoryNamespace` | `string` | The thread's memory namespace. At most 128 characters. See [Memory namespace](#memory-namespace). |
+| `threadCapabilities` | [`AgentCapabilities`](#agentcapabilities) | Overrides some of the agent's capabilities for this thread, frozen for its life. Sent as `options.capabilities`. |
+| `memoryNamespace` | `string` | **Deprecated:** use `threadCapabilities.memory`. The thread's memory namespace. At most 128 characters. See [Memory namespace](#memory-namespace). |
 
-`DisablableTool` is `'web'`, `'company_documents'`, `'mcp:<server>'` for one MCP
-server, or `'mcp:*'` for all of them.
+`DisablableTool` (deprecated with `disabledTools`) is `'web'`,
+`'company_documents'`, `'mcp:<server>'` for one MCP server, or `'mcp:*'` for all
+of them.
 
 Invalid arguments throw [`InvalidParams`](errors.md#invalid-parameters) before
-any request is sent.
+any request is sent. So do these combinations, which the API would refuse or
+which name the same thing twice:
+
+- `threadCapabilities` on `chat.send` (the API answers 422: a follow-up cannot
+  change the thread's capabilities);
+- `messageScope` with any of `sourceIds`, `documentIds` or `disabledTools` (the
+  API answers 422: send only `messageScope`);
+- `memoryNamespace` with `threadCapabilities.memory` (both name the thread's
+  memory).
 
 ### Capping tool rounds
 
@@ -143,16 +155,18 @@ to the model plus the tools it picks, so one round can hold several tool calls.
 
 ### Memory namespace
 
-`memoryNamespace` gives a thread the [memory files](#clientmemory) of one
-namespace to read and write.
+`threadCapabilities: { memory: { activation: 'always', namespace } }` gives a
+thread the [memory files](#clientmemory) of one namespace to read and write. The
+deprecated `memoryNamespace` does the same.
 
 - **Fixed when the thread starts.** The thread keeps it for life. `chat.send`
-  does not take it, and passing it there throws `InvalidParams` rather than
+  takes neither, and passing them there throws `InvalidParams` rather than
   being dropped. Start a new thread to use another namespace.
 - **Left out, the thread may have no memory.** It uses the namespace set on the
   agent, if there is one. Otherwise it runs with no memory tools at all, and no
-  error, field or event says so. A value you pass wins over the agent's; you
-  cannot force "no memory" on an agent that has a namespace.
+  error, field or event says so. A value you pass wins over the agent's, and
+  `memory: { activation: 'never' }` runs the thread without memory whatever the
+  agent has.
 - **Shared by the whole organization.** The client's `userId` is not part of
   it. To keep end users apart, put an identifier in the name, such as
   `support-bot-${userId}`. It is not a security boundary between agents either:
@@ -161,7 +175,8 @@ namespace to read and write.
   `${userId}::default`. Pass it to keep reading and writing those files;
   [`memory.listNamespaces`](#memorylistnamespacesoptions) shows them.
 - At most 128 characters, never trimmed. Threads and messages do not echo it
-  back, so keep the value you passed.
+  back, so keep the value you passed. In `threadCapabilities.memory` it must
+  not be empty; the deprecated `memoryNamespace` sends an empty one as given.
 
 ### `chat.stream(messageId, options?)`
 
@@ -172,6 +187,147 @@ stream(messageId: string, options?: { lastEventId?: string; signal?: AbortSignal
 Attach to an assistant message by id. Synchronous: no request is made until the
 run is consumed. Pass `lastEventId` to receive only the events after it. See
 [Resuming a dropped stream](streaming.md#resuming-a-dropped-stream).
+
+### `chat.cancel(messageId, options?)`
+
+```ts
+cancel(messageId: string, options?: { signal?: AbortSignal }): Promise<Message>
+```
+
+Stop an assistant message that is still being generated (`POST
+/chat/messages/{messageId}/cancel`). Resolves with the message, its `status` set
+to `'cancelled'`; what the agent produced so far stays in `events`.
+
+- `messageId` must be a UUID, or `InvalidParams` is thrown before any request.
+- **Not idempotent.** A message that already finished, failed or was cancelled
+  throws `APIError` with status 400 (`"Message is not live"`). User messages are
+  never live. An unknown message throws `NotFoundError`.
+- Unlike aborting a `signal`, which only closes your connection, this stops the
+  agent on the server.
+
+### `chat.export(messageId, params)`
+
+```ts
+export(messageId: string, params: ExportMessageParams): Promise<Uint8Array>
+```
+
+Render a finished message's content (Markdown) as a document and return its
+bytes (`GET /chat/messages/{messageId}/export?format=…`). No file name comes
+back: pick one when you write the bytes.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `format` | `ExportFormat` | **Required.** `'pdf'` or `'docx'`. |
+| `signal` | `AbortSignal` | Cancels the request. |
+
+A bad `messageId` or `format` throws `InvalidParams` before any request. A
+message with no content, for instance one still running, throws `APIError` with
+status 400 (`"Message has no content"`).
+
+### `chat.uploadFile(file, params?)`
+
+```ts
+uploadFile(file: UploadSource, params?: UploadFileParams): Promise<ConversationFile>
+```
+
+Upload a file so a message can use it: pass the returned `id` in `fileIds`. It
+runs the whole presigned upload — `GET /chat/files/upload` for a permission, a
+multipart `POST` of the bytes straight to the storage backend, then `POST
+/chat/files` to confirm — and resolves with the registered
+[`ConversationFile`](#conversationfile).
+
+`UploadSource` is a `Blob` (a `File` is one), an `ArrayBuffer`, or a view of one
+such as a `Uint8Array` or a Node `Buffer`. In Node, upload a path with
+`await fs.openAsBlob(path)`.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `filename` | `string` | 1 to 255 characters, no `/`. Optional for a `File` with a name, required otherwise. |
+| `mimetype` | `string` | Left out: the `Blob`'s `type`, then a guess from the file name, then `application/octet-stream`. |
+| `signal` | `AbortSignal` | Cancels every request of the upload. |
+
+- Checked before anything is sent, with `InvalidParams`: the kind of `file` (a
+  string is refused, as ambiguous between a path and text), its size (at most
+  500 MiB, `UPLOAD_MAX_BYTES`), `filename` and `mimetype`. The file is never
+  echoed in an error.
+- The storage request carries none of the client's headers, so your API key
+  only ever goes to the Cominty API. Error messages leave out the presigned
+  URL's query, where its signature is.
+- A storage refusal throws the `APIError` for its status, with the storage
+  reason as `detail` (for instance `EntityTooLarge: …`). So does a redirect,
+  which a presigned URL cannot survive. The server also caps uploads per day per
+  organization.
+- An answer the SDK cannot use — a permission without a `url` or a `key`, or a
+  storage success without an `ETag` header — throws `SDKError`. In a browser,
+  the bucket's CORS rules must expose `ETag` to your origin.
+- The client's `timeout` applies to each of the three requests.
+
+### `chat.downloadFile(fileId, options?)`
+
+```ts
+downloadFile(fileId: string, options?: { signal?: AbortSignal }): Promise<Uint8Array>
+```
+
+The content of a conversation file, uploaded or produced by the agent. `GET
+/chat/files/{fileId}` answers with a presigned URL valid for 5 minutes; the bytes
+are then fetched from it without your API key. Not scoped to the client's
+`userId`: any file created through the API in the same organization can be
+downloaded. The whole file is held in memory.
+
+An empty `fileId` throws `InvalidParams`; an unknown one `NotFoundError`; an
+answer that is not a URL `SDKError`; a storage refusal its `APIError`.
+
+---
+
+## Capabilities and message scope
+
+A capability is something the agent may use. `threadCapabilities` on
+`chat.start` installs or removes capabilities for the thread's whole life;
+`messageScope` on `chat.start` and `chat.send` turns them on or off, or narrows
+them, for one message. Both are plain objects with camelCase keys, sent in
+snake_case. See the [README](../README.md#capabilities) for a full example.
+
+### `AgentCapabilities`
+
+| Key | Type | Activations | Filters |
+| --- | --- | --- | --- |
+| `web` | `SingleCapability` | `always`, `on_request`, `never` | — |
+| `indexedDocuments` | `IndexedDocumentsCapability` | `always`, `on_request`, `never` | `sourceIds: number[]`, `documentIds: string[]` |
+| `mcp` | `McpCapability` | `always`, `on_request`, `never` | `connections: string[]` |
+| `skills` | `SkillsCapability` | `always`, `never` | `include: string[]` |
+| `imageGeneration` | `SingleCapability` | `always`, `on_request`, `never` | — |
+| `videoGeneration` | `SingleCapability` | `always`, `on_request`, `never` | — |
+| `musicGeneration` | `SingleCapability` | `always`, `on_request`, `never` | — |
+| `memory` | `MemoryCapability` | `always`, `never` | `namespace: string`, required with `always` |
+
+Each entry is `{ activation, ...filters }`. `'always'` is on by default,
+`'on_request'` is installed but off until a message enables it, `'never'` is not
+installed. A capability you pass replaces the agent's; the others keep the
+agent's value.
+
+### `MessageScope`
+
+`web`, `indexedDocuments`, `mcp`, `imageGeneration`, `videoGeneration` and
+`musicGeneration`, each `{ enabled, ...filters }` with the same filters as above.
+There is no `skills` or `memory` scope. A message can only narrow what the
+thread allows: widening an allowlist, or targeting a capability the thread does
+not have, is the server's 422.
+
+### Rules
+
+Checked before any request, every problem named in one `InvalidParams`:
+
+- `activation` (or `enabled`, a boolean) is required. There are no shortcuts
+  like `web: true`.
+- A filter is `ALL` (`'*'`, every id the end user can access) or a non-empty
+  array. Left out, it is `ALL`, and is sent as such. `null`, `[]` and a `'*'`
+  inside an array are refused. `sourceIds` are integers, the other ids strings.
+- `'never'` and `enabled: false` take no filter, and are sent as
+  `{ activation: 'never' }` and `{ enabled: false }` alone.
+- `memory` with `'always'` needs a `namespace` of 1 to 128 characters; with
+  `'never'` it takes none.
+- Unknown keys are refused, with a hint when a snake_case key has a camelCase
+  name (`source_ids` → `sourceIds`).
 
 ---
 
@@ -433,6 +589,12 @@ Answer by sending one of the options, or any free text, with `chat.send`.
 `ShareLink` has `id`, `url`, `created_at`, `expires_at`, `last_accessed_at`,
 `access_count`, `revoked`, `expired` and `protected`.
 
+Supporting types: `UploadSource`, `UploadFileParams`, `ExportFormat`,
+`ExportMessageParams`; for capabilities, `Activation`, `All`, `AllowList`,
+`SingleCapability`, `IndexedDocumentsCapability`, `McpCapability`,
+`SkillsCapability`, `MemoryCapability`, `SingleScope`, `IndexedDocumentsScope`
+and `McpScope`.
+
 ### `MemoryFile` and `MemoryFileSummary`
 
 | Field | Type | Description |
@@ -507,5 +669,7 @@ Supporting types: `ErrorDetail`, `InvalidParam`, `RateLimitScope`.
 | `DEFAULT_TIMEOUT_MS` | `60000` |
 | `CONTENT_MAX_LENGTH` | `30000` — maximum `message` length |
 | `MAX_FILES` | `5` — maximum `fileIds` per message |
-| `DISABLE_ALL_MCP` | `'mcp:*'` |
-| `DISABLE_MCP_PREFIX` | `'mcp:'` |
+| `ALL` | `'*'` — the "no restriction" filter of a capability or scope |
+| `UPLOAD_MAX_BYTES` | `524288000` (500 MiB) — maximum `chat.uploadFile` size |
+| `DISABLE_ALL_MCP` | `'mcp:*'` — **deprecated**, with `disabledTools` |
+| `DISABLE_MCP_PREFIX` | `'mcp:'` — **deprecated**, with `disabledTools` |

@@ -49,12 +49,12 @@ try {
         console.log(`stale version refused; the current one is ${fresh.version}`)
     }
 
-    // The namespace is fixed when the thread starts. Without one, a thread has no
-    // memory unless its agent has a namespace of its own.
+    // The namespace is fixed when the thread starts. Without a memory capability,
+    // a thread has no memory unless its agent has a namespace of its own.
     const run = await client.chat.start({
         agentId: AGENT_ID,
         message: 'Check your memory: what tone should you write in?',
-        memoryNamespace: namespace,
+        threadCapabilities: { memory: { activation: 'always', namespace } },
     })
     console.log(`\n${await run.text()}`)
 } finally {

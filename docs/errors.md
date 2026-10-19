@@ -139,8 +139,9 @@ than start over.
 
 ## Invalid parameters
 
-`chat.start`, `chat.send` and the `client.memory` methods validate their
-arguments before sending anything. `InvalidParams` lists every problem at once,
+`chat.start`, `chat.send`, `chat.cancel`, `chat.export`, `chat.uploadFile`,
+`chat.downloadFile` and the `client.memory` methods validate their arguments
+before sending anything. `InvalidParams` lists every problem at once,
 not just the first:
 
 ```ts
@@ -164,9 +165,18 @@ Each entry has `param`, `message` and, where useful, the offending `input`.
 Some values are refused here because the API would not complain about them:
 `memoryNamespace` on `chat.send` (the API ignores it — a thread keeps the
 namespace it was started with) and a `null` `content` or `purpose` on
-`memory.update` (the API ignores it and still answers 200). A malformed
-`version` is the opposite case: the SDK does not inspect it, so it comes back as
-a 422 `APIError`.
+`memory.update` (the API ignores it and still answers 200). Others are refused
+here because the API would answer 422 anyway: `threadCapabilities` on
+`chat.send`, and `messageScope` together with the deprecated `sourceIds`,
+`documentIds` or `disabledTools`. `memoryNamespace` together with
+`threadCapabilities.memory` is refused because both name the thread's memory. A
+malformed `version` is the opposite case: the SDK does not inspect it, so it
+comes back as a 422 `APIError`.
+
+`chat.uploadFile` and `chat.downloadFile` also talk to the storage backend. Its
+refusals are the same `APIError` subclasses, with the storage reason as
+`detail` (`EntityTooLarge: …`, `AccessDenied: Request has expired`), and an
+answer the SDK cannot use — no `ETag`, no presigned `key` — is an `SDKError`.
 
 ## Retrying
 

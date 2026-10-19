@@ -152,7 +152,9 @@ To stop reading without an error, `break` out of the loop or call
 `await run.close()`. `client.close()` aborts everything the client has in flight.
 
 > Cancelling stops **your connection**. It does not stop the agent, which keeps
-> running on the server; the finished message will be in the thread.
+> running on the server; the finished message will be in the thread. To stop the
+> agent itself, call
+> [`client.chat.cancel(run.messageId)`](api.md#chatcancelmessageid-options).
 
 The client's `timeout` option applies to ordinary requests only. Streams have no
 overall timeout, because a run can legitimately take minutes — use a signal to

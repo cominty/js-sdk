@@ -8,7 +8,7 @@
  */
 
 import type { ResolvedConfig } from './config.ts'
-import { APIConnectionError, errorFromResponse } from './errors.ts'
+import { APIConnectionError, ComintyError, SDKError, errorFromResponse } from './errors.ts'
 
 const TOKEN_HEADER = 'x-cominty-token'
 
@@ -50,7 +50,7 @@ export class Transport {
                 signal: controller.signal,
             })
         } catch (cause) {
-            throw this.#connectionError(cause, options.signal, path, 'Request')
+            throw this.#connectionError(cause, options.signal, path, 'Request to')
         } finally {
             cleanup()
         }
@@ -88,7 +88,7 @@ export class Transport {
             })
         } catch (cause) {
             cleanup()
-            throw this.#connectionError(cause, options.signal, path, 'Stream')
+            throw this.#connectionError(cause, options.signal, path, 'Stream to')
         }
 
         try {
@@ -122,13 +122,86 @@ export class Transport {
             } catch (cause) {
                 // Only `reader.read()` can throw here: an abort, or the connection
                 // dropping mid-stream.
-                throw this.#connectionError(cause, options.signal, path, 'Stream')
+                throw this.#connectionError(cause, options.signal, path, 'Stream to')
             } finally {
                 await reader.cancel().catch(() => {})
             }
         } finally {
             cleanup()
         }
+    }
+
+    /**
+     * Send a request and return the raw response body: for endpoints that answer
+     * with a file rather than JSON. Errors are mapped as in {@link request}.
+     */
+    async requestBytes(
+        method: string,
+        path: string,
+        options: RequestOptions = {},
+    ): Promise<Uint8Array> {
+        const init = {
+            method,
+            headers: this.#headers(false, { accept: '*/*', ...options.headers }),
+        }
+        return this.#exchange(
+            this.#url(path, options.params),
+            init,
+            options.signal,
+            ['Request to', path],
+            async (response) => {
+                if (!response.ok) {
+                    throw errorFromResponse(
+                        response.status,
+                        await safeJson(response),
+                        response.headers,
+                    )
+                }
+                return new Uint8Array(await response.arrayBuffer())
+            },
+        )
+    }
+
+    /**
+     * POST a multipart form to a presigned storage URL and return the `ETag` the
+     * storage backend answered with.
+     *
+     * Sent with no header of ours: the API key must never reach the storage host.
+     * The URL's query holds its signature, so errors name the URL without it.
+     */
+    async uploadToPresignedUrl(url: string, form: FormData, signal?: AbortSignal): Promise<string> {
+        const init: RequestInit = { method: 'POST', body: form, redirect: 'manual' }
+        return this.#exchange(
+            url,
+            init,
+            signal,
+            ['Upload to', withoutQuery(url)],
+            async (response) => {
+                await requireStorageSuccess(response)
+                const etag = response.headers.get('etag')
+                if (etag === null) {
+                    throw new SDKError(
+                        'the storage backend accepted the upload but sent no ETag header',
+                    )
+                }
+                return etag
+            },
+        )
+    }
+
+    /** GET a presigned storage URL and return its bytes. No header of ours is sent. */
+    async downloadFromPresignedUrl(url: string, signal?: AbortSignal): Promise<Uint8Array> {
+        const init: RequestInit = { method: 'GET', redirect: 'manual' }
+        return this.#exchange(
+            url,
+            init,
+            signal,
+            ['Download from', withoutQuery(url)],
+            async (response) => {
+                await requireStorageSuccess(response)
+                return new Uint8Array(await response.arrayBuffer())
+            },
+        )
     }
 
     /** Abort every in-flight request. */
@@ -160,6 +233,29 @@ export class Transport {
                 if (timer !== undefined) clearTimeout(timer)
                 this.#inflight.delete(controller)
             },
+        }
+    }
+
+    /**
+     * One fetch plus reading its body, both under the client's timeout. `read`
+     * throws SDK errors as they are; anything else is a connection failure.
+     */
+    async #exchange<T>(
+        url: string,
+        init: RequestInit,
+        signal: AbortSignal | undefined,
+        [what, target]: [string, string],
+        read: (response: Response) => Promise<T>,
+    ): Promise<T> {
+        const { controller, cleanup } = this.#controller(signal, this.#config.timeout)
+        try {
+            const response = await this.#config.fetch(url, { ...init, signal: controller.signal })
+            return await read(response)
+        } catch (cause) {
+            if (cause instanceof ComintyError) throw cause
+            throw this.#connectionError(cause, signal, target, what)
+        } finally {
+            cleanup()
         }
     }
 
@@ -196,14 +292,11 @@ export class Transport {
             // The caller's own abort propagates unchanged; ours becomes a timeout.
             if (signal?.aborted) return cause
             if (this.#closed)
-                return new APIConnectionError(
-                    `${what} to ${path} was aborted: client closed`,
-                    cause,
-                )
-            return new APIConnectionError(`${what} to ${path} timed out`, cause)
+                return new APIConnectionError(`${what} ${path} was aborted: client closed`, cause)
+            return new APIConnectionError(`${what} ${path} timed out`, cause)
         }
         const detail = cause instanceof Error ? cause.message : String(cause)
-        return new APIConnectionError(`${what} to ${path} failed: ${detail}`, cause)
+        return new APIConnectionError(`${what} ${path} failed: ${detail}`, cause)
     }
 }
 
@@ -222,6 +315,51 @@ function parseLine(raw: string): Record<string, unknown> | null {
     // Rule 1: `"heartbeat"` is a bare string, not an object.
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     return parsed as Record<string, unknown>
+}
+
+/** A presigned URL carries its signature in the query string: keep it out of errors. */
+function withoutQuery(url: string): string {
+    return url.split('?', 1)[0]!.split('#', 1)[0]!
+}
+
+/**
+ * Throw unless the storage backend answered 2xx. A presigned URL cannot survive
+ * a redirect, so redirects are not followed: a 3xx is a failure too.
+ */
+async function requireStorageSuccess(response: Response): Promise<void> {
+    if (response.ok) return
+    if (response.status >= 400) {
+        const text = await response.text().catch(() => '')
+        const body = parseJson(text) ?? storageErrorBody(text, response.headers)
+        throw errorFromResponse(response.status, body, response.headers)
+    }
+    const body = { detail: 'the storage backend answered with a redirect instead of the file' }
+    throw errorFromResponse(response.status, body, response.headers)
+}
+
+/** S3 answers errors with XML, not JSON: surface its Code and Message as the detail. */
+function storageErrorBody(text: string, headers: Headers): { detail: string } | null {
+    if (!(headers.get('content-type') ?? '').includes('xml')) return null
+    const code = /<Code>(.*?)<\/Code>/s.exec(text)
+    if (!code) return null
+    const message = /<Message>(.*?)<\/Message>/s.exec(text)
+    const detail = unescapeXml(code[1]!)
+    return { detail: message ? `${detail}: ${unescapeXml(message[1]!)}` : detail }
+}
+
+const XML_ENTITIES: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' }
+
+/** The five XML entities; anything else is left as it is. */
+function unescapeXml(value: string): string {
+    return value.replace(/&(lt|gt|quot|apos|amp);/g, (_, name: string) => XML_ENTITIES[name]!)
+}
+
+function parseJson(text: string): unknown {
+    try {
+        return text ? JSON.parse(text) : null
+    } catch {
+        return null
+    }
 }
 
 async function safeJson(response: Response): Promise<unknown> {

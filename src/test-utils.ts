@@ -4,7 +4,12 @@ export interface RecordedCall {
     url: string
     method: string
     headers: Record<string, string>
+    /** The JSON body, decoded. `undefined` for any other body. */
     body: unknown
+    /** The body as it was passed to `fetch`, e.g. a `FormData`. */
+    rawBody: unknown
+    redirect: RequestRedirect | undefined
+    signal: AbortSignal | null | undefined
 }
 
 export interface MockFetch {
@@ -13,7 +18,9 @@ export interface MockFetch {
 }
 
 /** A `fetch` that replays canned responses in order and records every call. */
-export function mockFetch(responses: (Response | (() => Response))[]): MockFetch {
+export function mockFetch(
+    responses: (Response | ((init?: RequestInit) => Response | Promise<Response>))[],
+): MockFetch {
     let index = 0
     const calls: RecordedCall[] = []
     const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -26,10 +33,13 @@ export function mockFetch(responses: (Response | (() => Response))[]): MockFetch
             method: init?.method ?? 'GET',
             headers,
             body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+            rawBody: init?.body,
+            redirect: init?.redirect,
+            signal: init?.signal,
         })
         const next = responses[index++]
         if (!next) throw new Error(`mockFetch: no response queued for call ${index}`)
-        return typeof next === 'function' ? next() : next
+        return typeof next === 'function' ? next(init) : next
     }
     return Object.assign(impl, { calls }) as MockFetch
 }
@@ -60,6 +70,22 @@ export function streamResponse(chunks: string[], init: ResponseInit = {}): Respo
         status: 200,
         headers: { 'content-type': 'application/jsonl' },
         ...init,
+    })
+}
+
+/** A binary response, such as an exported document or a stored file. */
+export function bytesResponse(bytes: Uint8Array, init: ResponseInit = {}): Response {
+    return new Response(bytes as BodyInit, {
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+        ...init,
+    })
+}
+
+/** A response that never arrives: the request hangs until its signal aborts it. */
+export function stalledResponse(init?: RequestInit): Promise<Response> {
+    return new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
     })
 }
 
@@ -96,6 +122,19 @@ export function startedThread(overrides: Record<string, unknown> = {}) {
             { ...assistantMessage(), role: 'user', id: 'user-msg', content: 'Hi' },
             { ...assistantMessage(), live: true, status: 'running', content: '' },
         ],
+        ...overrides,
+    }
+}
+
+export function conversationFile(overrides: Record<string, unknown> = {}) {
+    return {
+        id: 'file_1',
+        name: 'data.csv',
+        size: 8,
+        mimetype: 'text/csv',
+        origin: 'user',
+        share_links: [],
+        url: 'https://files.example/data.csv',
         ...overrides,
     }
 }
