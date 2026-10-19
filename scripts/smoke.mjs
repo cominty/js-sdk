@@ -19,7 +19,7 @@ const work = mkdtempSync(join(tmpdir(), 'cominty-sdk-smoke-'))
 
 const CONSUMER = `
 import assert from 'node:assert/strict'
-import { Cominty, ComintyError, InvalidParams, isKnownEvent } from '@cominty-ai/sdk'
+import { ALL, Cominty, ComintyError, InvalidParams, isKnownEvent } from '@cominty-ai/sdk'
 
 const calls = []
 const client = new Cominty({
@@ -38,6 +38,12 @@ assert.equal(calls[0].headers['x-cominty-token'], 'test-key')
 await assert.rejects(() => client.chat.start({ agentId: '', message: 'hi' }), InvalidParams)
 assert.ok(InvalidParams.prototype instanceof ComintyError)
 assert.equal(typeof isKnownEvent, 'function')
+assert.equal(ALL, '*')
+await assert.rejects(
+    () => client.chat.send('t', { agentId: 'a', message: 'hi', threadCapabilities: {} }),
+    InvalidParams,
+)
+assert.equal(typeof client.chat.uploadFile, 'function')
 
 console.log('smoke test passed on node ' + process.version)
 `

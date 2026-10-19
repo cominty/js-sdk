@@ -11,6 +11,12 @@
  */
 
 import { InvalidParams, SDKError, type InvalidParam } from '../errors.ts'
+import {
+    buildCapabilities,
+    buildScope,
+    type AgentCapabilities,
+    type MessageScope,
+} from './capabilities.ts'
 import { checkNamespace } from './memory.ts'
 
 /** Max content length, enforced server-side (`CHAT_MESSAGE_MAX_LENGTH`). */
@@ -18,9 +24,18 @@ export const CONTENT_MAX_LENGTH = 30_000
 /** Max files per message (`CHAT_MESSAGE_MAX_FILES`). */
 export const MAX_FILES = 5
 
-/** Prefix that disables a single MCP server, e.g. `mcp:slack`. */
+/**
+ * Prefix that disables a single MCP server, e.g. `mcp:slack`.
+ *
+ * @deprecated Goes with `disabledTools`. Narrow MCP servers with
+ * `messageScope: { mcp: { enabled: true, connections: [...] } }` instead.
+ */
 export const DISABLE_MCP_PREFIX = 'mcp:'
-/** Disables every connected MCP server at once. */
+/**
+ * Disables every connected MCP server at once.
+ *
+ * @deprecated Goes with `disabledTools`. Use `messageScope: { mcp: { enabled: false } }`.
+ */
 export const DISABLE_ALL_MCP = `${DISABLE_MCP_PREFIX}*`
 
 export type MessageRole = 'user' | 'assistant'
@@ -30,6 +45,8 @@ export type ContentOrigin = 'user' | 'agent'
 /**
  * A tool the agent may disable: the built-in `web` / `company_documents`, or an
  * MCP token `mcp:<server>` (`mcp:*` for all).
+ *
+ * @deprecated Goes with `disabledTools`. Turn tools off with `messageScope`.
  */
 export type DisablableTool = 'web' | 'company_documents' | `mcp:${string}`
 
@@ -127,11 +144,31 @@ export interface MessageParams {
     message: string
     /** Attach previously-uploaded files. Max 5. */
     fileIds?: string[]
-    /** Restrict retrieval to specific knowledge sources. */
+    /**
+     * Turns capabilities on or off, or narrows their allowlists, for this message
+     * only. Limited to what the thread allows. Sent as `message.scope`.
+     */
+    messageScope?: MessageScope
+    /**
+     * Restrict retrieval to specific knowledge sources.
+     *
+     * @deprecated Use `messageScope: { indexedDocuments: { enabled: true, sourceIds } }`.
+     * Cannot be combined with `messageScope`.
+     */
     sourceIds?: number[]
-    /** Restrict retrieval to specific documents. */
+    /**
+     * Restrict retrieval to specific documents.
+     *
+     * @deprecated Use `messageScope: { indexedDocuments: { enabled: true, documentIds } }`.
+     * Cannot be combined with `messageScope`.
+     */
     documentIds?: string[]
-    /** Turn tools off for this message. */
+    /**
+     * Turn tools off for this message.
+     *
+     * @deprecated Use `messageScope`, e.g. `{ web: { enabled: false } }`. Cannot be
+     * combined with `messageScope`.
+     */
     disabledTools?: DisablableTool[]
     /**
      * Cap on the agent's tool rounds for this message only: an integer `>= 1`.
@@ -142,13 +179,23 @@ export interface MessageParams {
     signal?: AbortSignal
 }
 
-/** `chat.start` additionally names the new thread and picks its memory namespace. */
+/** `chat.start` additionally names the new thread and sets its capabilities. */
 export interface StartChatParams extends MessageParams {
     name?: string
+    /**
+     * Overrides some of the agent's capabilities for this thread, frozen for its
+     * whole life: a follow-up cannot change it. Each capability you pass replaces
+     * the agent's; the others keep the agent's value. `memory` sets the thread's
+     * memory namespace. Sent as `options.capabilities`.
+     */
+    threadCapabilities?: AgentCapabilities
     /**
      * The memory namespace the thread reads and writes, fixed for its whole life.
      * Max 128 characters. Leave it out and the thread has no memory, unless the
      * agent has a namespace of its own.
+     *
+     * @deprecated Use `threadCapabilities: { memory: { activation: 'always', namespace } }`.
+     * Cannot be combined with `threadCapabilities.memory`.
      */
     memoryNamespace?: string
 }
@@ -169,8 +216,15 @@ interface ChatBody {
         source_ids?: number[]
         document_ids?: string[]
         disabled_tools?: string[]
+        scope?: Record<string, unknown>
     }
-    options: { agent_id: string; user_id: string; max_steps?: number; memory_namespace?: string }
+    options: {
+        agent_id: string
+        user_id: string
+        max_steps?: number
+        memory_namespace?: string
+        capabilities?: Record<string, unknown>
+    }
 }
 
 /**
@@ -275,6 +329,41 @@ export function buildChatBody(
         })
     }
 
+    let capabilities: Record<string, unknown> | undefined
+    if (context === 'chat.start') {
+        capabilities = buildCapabilities(errors, 'threadCapabilities', params.threadCapabilities)
+        // A reading, not an API rule: both name the thread's memory, and which one
+        // the API would keep is not documented. Refuse the pair rather than guess.
+        if (params.memoryNamespace !== undefined && hasKey(params.threadCapabilities, 'memory')) {
+            errors.push({
+                param: 'memoryNamespace',
+                message:
+                    'cannot be combined with threadCapabilities.memory: both set the ' +
+                    "thread's memory. Pass the namespace in threadCapabilities.memory only",
+            })
+        }
+    } else if (params.threadCapabilities !== undefined) {
+        // The API answers 422 "options.capabilities cannot be set on a follow-up message".
+        errors.push({
+            param: 'threadCapabilities',
+            message:
+                'not accepted on a follow-up: a thread keeps the capabilities it was started ' +
+                'with. Narrow them for this message with messageScope instead',
+        })
+    }
+
+    const scope = buildScope(errors, 'messageScope', params.messageScope)
+    if (params.messageScope !== undefined) {
+        // The API answers 422 "Cannot set both 'scope' and legacy message fields".
+        for (const [legacy, instead] of LEGACY_MESSAGE_FIELDS) {
+            if (params[legacy] === undefined) continue
+            errors.push({
+                param: legacy,
+                message: `cannot be combined with messageScope: send only messageScope, with ${instead}`,
+            })
+        }
+    }
+
     if (errors.length > 0) throw new InvalidParams(context, errors)
 
     // `exclude_none` equivalent: omitted keys rather than explicit nulls.
@@ -283,14 +372,31 @@ export function buildChatBody(
     if (params.sourceIds !== undefined) message.source_ids = params.sourceIds
     if (params.documentIds !== undefined) message.document_ids = params.documentIds
     if (params.disabledTools !== undefined) message.disabled_tools = params.disabledTools
+    if (scope !== undefined) message.scope = scope
 
     const options: ChatBody['options'] = { agent_id: params.agentId, user_id: userId }
     if (params.maxSteps !== undefined) options.max_steps = params.maxSteps
     if (params.memoryNamespace !== undefined) options.memory_namespace = params.memoryNamespace
+    if (capabilities !== undefined) options.capabilities = capabilities
 
     const body: ChatBody = { message, options }
     if (params.name !== undefined) body.name = params.name
     return body
+}
+
+/** The deprecated message fields `messageScope` replaces, and where each one went. */
+const LEGACY_MESSAGE_FIELDS: [keyof MessageParams, string][] = [
+    ['sourceIds', 'indexedDocuments.sourceIds'],
+    ['documentIds', 'indexedDocuments.documentIds'],
+    ['disabledTools', 'the tools turned off there, e.g. { web: { enabled: false } }'],
+]
+
+function hasKey(value: unknown, key: string): boolean {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        (value as Record<string, unknown>)[key] !== undefined
+    )
 }
 
 function checkStringArray(
@@ -322,4 +428,48 @@ export function liveAssistantMessage(thread: Thread): Message {
         if (msg.role === 'assistant') return msg
     }
     throw new SDKError('started thread contained no assistant message to stream')
+}
+
+// ── Cancel and export ─────────────────────────────────────────────────────── //
+
+/** A document format a finished message can be exported to. */
+export type ExportFormat = 'pdf' | 'docx'
+
+const EXPORT_FORMATS: readonly ExportFormat[] = ['pdf', 'docx']
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export interface ExportMessageParams {
+    /** `'pdf'` or `'docx'`. */
+    format: ExportFormat
+    signal?: AbortSignal
+}
+
+/** Check a message id: the API takes a UUID in the path. */
+export function checkMessageId(errors: InvalidParam[], value: unknown): void {
+    if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+        errors.push({ param: 'messageId', message: 'must be a message UUID', input: value })
+    }
+}
+
+/** Validate `chat.export` arguments and build the query of its request. */
+export function buildExportQuery(
+    messageId: string,
+    params: ExportMessageParams,
+): { format: string } {
+    const { format } = params ?? {}
+    const errors: InvalidParam[] = []
+    checkMessageId(errors, messageId)
+    if (!EXPORT_FORMATS.includes(format)) {
+        errors.push({
+            param: 'format',
+            message:
+                format === undefined
+                    ? "required, must be 'pdf' or 'docx'"
+                    : "must be 'pdf' or 'docx'",
+            input: format,
+        })
+    }
+    if (errors.length > 0) throw new InvalidParams('chat.export', errors)
+    return { format }
 }

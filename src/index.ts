@@ -54,6 +54,23 @@ export {
 } from './events.ts'
 
 export {
+    ALL,
+    type Activation,
+    type AgentCapabilities,
+    type All,
+    type AllowList,
+    type IndexedDocumentsCapability,
+    type IndexedDocumentsScope,
+    type McpCapability,
+    type McpScope,
+    type MemoryCapability,
+    type MessageScope,
+    type SingleCapability,
+    type SingleScope,
+    type SkillsCapability,
+} from './models/capabilities.ts'
+
+export {
     CONTENT_MAX_LENGTH,
     DISABLE_ALL_MCP,
     DISABLE_MCP_PREFIX,
@@ -63,6 +80,8 @@ export {
     type ContentOrigin,
     type ConversationFile,
     type DisablableTool,
+    type ExportFormat,
+    type ExportMessageParams,
     type Message,
     type MessageParams,
     type MessageRole,
@@ -74,6 +93,8 @@ export {
     type ThreadSummary,
     type UpdateThreadParams,
 } from './models/chat.ts'
+
+export { UPLOAD_MAX_BYTES, type UploadFileParams, type UploadSource } from './models/files.ts'
 
 export type {
     CreateMemoryFileParams,

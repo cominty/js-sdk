@@ -33,7 +33,7 @@ track the same API and the same release cadence.
 ## Contents
 
 - [Requirements](#requirements) · [Installation](#installation) · [Authentication](#authentication)
-- [Quick start](#quick-start)
+- [Quick start](#quick-start) · [Capabilities](#capabilities)
 - [Message parameters](#message-parameters) · [Configuration](#configuration) · [Error handling](#error-handling)
 - [Examples](#examples) · [Contributing](#contributing)
 
@@ -228,6 +228,94 @@ To let an agent essentially never hit the cap, pass a very large value such as
 starts, and the cost is deducted only when it finishes — so a long run on an
 expensive model can go well past the budget you meant before anything stops it.
 
+### Stop a message
+
+`chat.cancel(messageId)` stops an assistant message that is still being
+generated and returns it with `status` set to `'cancelled'`. It takes effect
+immediately, and what the agent produced so far stays in `events`.
+
+```ts
+const run = await client.chat.start({ agentId, message: 'Write a very long report.' })
+
+for await (const event of run) {
+    if (userClickedStop()) {
+        const message = await client.chat.cancel(run.messageId)
+        console.log(message.status) // 'cancelled'
+        break // closes the event stream
+    }
+}
+```
+
+Cancelling is not idempotent: a message that already finished, failed, or was
+already cancelled throws `APIError` (status 400, `"Message is not live"`), so a
+"stop" button should treat that error as "too late". An unknown message throws
+`NotFoundError`. Aborting a `signal` is different: it only closes your
+connection, and the agent keeps running.
+
+### Export a message as a document
+
+`chat.export(messageId, { format })` renders a finished message to a file and
+returns its bytes as a `Uint8Array`. `format` is `'pdf'` or `'docx'` (any other
+value throws `InvalidParams` before a request is sent).
+
+```ts
+import { writeFile } from 'node:fs/promises'
+
+const run = await client.chat.start({ agentId, message: 'Write a short product brief.' })
+const reply = await run.result()
+
+const pdf = await client.chat.export(reply.id, { format: 'pdf' })
+await writeFile('brief.pdf', pdf)
+```
+
+The server sends no file name, so pick one when you write the bytes. A message
+without content (for instance one still running) throws `APIError` (status 400,
+`"Message has no content"`).
+
+### Give the agent files
+
+`chat.uploadFile` registers a file, and its `id` goes in `fileIds` (5 files per
+message at most). Pass a `Blob` or a `File` (a `File`'s name and type are used),
+or an `ArrayBuffer` or `Uint8Array` (then `filename` is required). `filename` and
+`mimetype` can always be overridden; a mimetype left out is the `Blob`'s type,
+then a guess from the file name, then `application/octet-stream`.
+
+```ts
+import { openAsBlob } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import { basename } from 'node:path'
+
+const report = await client.chat.uploadFile(await openAsBlob('q3-report.pdf'), {
+    filename: 'q3-report.pdf',
+})
+const data = await client.chat.uploadFile(new TextEncoder().encode('a,b\n1,2\n'), {
+    filename: 'data.csv',
+})
+
+const run = await client.chat.start({
+    agentId,
+    message: 'Compare these two files.',
+    fileIds: [report.id, data.id],
+})
+const reply = await run.result()
+
+// Download any conversation file by id, including the ones the agent produced.
+// Keep only the last path segment: file names are not under your control.
+for (const file of reply.files) {
+    await writeFile(basename(file.name), await client.chat.downloadFile(file.id))
+}
+```
+
+A string is refused (`InvalidParams`): it would be ambiguous between a path and
+text. The bytes go straight to the storage backend through a presigned URL: your
+API key is only ever sent to the Cominty API, and error messages never show a
+presigned URL's signature. A file is at most 500 MiB: a bigger one throws
+`InvalidParams` before anything is sent. The server also caps the number of
+uploads per day per organization, and another deployment may set a lower size
+limit; such a refusal throws `APIError` with the storage reason (for instance
+`EntityTooLarge`). The API has no way to delete or list uploaded files, and a
+download is held in memory.
+
 ### Manage threads
 
 `client.threads` is scoped to the client's `userId` automatically.
@@ -282,24 +370,27 @@ file = await client.memory.update('tone.md', {
 await client.memory.delete('tone.md', { namespace })
 ```
 
-To let an agent use the files, start the thread in their namespace:
+To let an agent use the files, start the thread in their namespace with the
+`memory` [capability](#capabilities):
 
 ```ts
 const run = await client.chat.start({
     agentId,
     message: 'Use the tone file.',
-    memoryNamespace: namespace,
+    threadCapabilities: { memory: { activation: 'always', namespace } },
 })
 ```
 
 Three things to know before you rely on it:
 
 - **The namespace is fixed when the thread starts.** The thread keeps it for
-  life, and `chat.send` does not take `memoryNamespace` — passing it throws
+  life, and `chat.send` takes no `threadCapabilities` — passing them throws
   `InvalidParams`. Start a new thread to use another one.
-- **A thread with no namespace has no memory.** Without `memoryNamespace`, a
-  thread uses the namespace set on its agent, if there is one; otherwise it runs
-  with no memory tools at all, and no error, field or event says so.
+- **A thread with no namespace may have no memory.** Without a `memory`
+  capability, a thread uses the namespace set on its agent, if there is one;
+  otherwise it runs with no memory tools at all, and no error, field or event
+  says so. `{ activation: 'never' }` runs it without memory whatever the agent
+  has.
 - **A namespace is shared by the whole organization.** The client's `userId` is
   not part of it, and memory calls do not send it. To keep your end users apart,
   put an identifier in the name — `support-bot-${userId}` — and don't treat a
@@ -328,6 +419,72 @@ for await (const event of run) console.log(event.name)
 
 See [Resuming a dropped stream](docs/streaming.md#resuming-a-dropped-stream) for
 a complete reconnect loop.
+
+## Capabilities
+
+A capability is something the agent may use: `web`, `indexedDocuments`, `mcp`,
+`skills`, `imageGeneration`, `videoGeneration`, `musicGeneration`, plus `memory`.
+Each one is an explicit object, and the parameter name tells you the scope:
+
+```ts
+import { ALL } from '@cominty-ai/sdk'
+
+const run = await client.chat.start({
+    agentId,
+    message: 'Summarize every board deck',
+    threadCapabilities: {
+        // frozen for the thread, start only
+        web: { activation: 'always' },
+        // documentIds left out: defaults to ALL
+        indexedDocuments: { activation: 'always', sourceIds: [101] },
+        // explicit ALL, same as leaving connections out
+        mcp: { activation: 'on_request', connections: ALL },
+        skills: { activation: 'always' },
+        imageGeneration: { activation: 'on_request' },
+        memory: { activation: 'always', namespace: 'support-bot' },
+    },
+    // this message only
+    messageScope: { imageGeneration: { enabled: true } },
+})
+
+await client.chat.send(run.thread.id, {
+    agentId,
+    message: 'Only deck 2024',
+    messageScope: {
+        indexedDocuments: { enabled: true, sourceIds: [101] },
+        mcp: { enabled: true, connections: ['linear'] },
+        web: { enabled: false },
+    },
+})
+```
+
+- There are no shortcuts: no `web: true`, no `web: 'on_request'`. Thread
+  capabilities are `{ activation }` objects, message scopes are `{ enabled }`
+  objects, and the activation is always required.
+- Activation is `'always'` (on by default), `'on_request'` (off until a message
+  enables it) or `'never'` (not installed). `skills` and `memory` have no
+  `'on_request'`. A capability you do not pass keeps the agent's value.
+- Filters (`sourceIds`, `documentIds`, `connections`, `include`) default to `ALL`
+  (the string `'*'`, no restriction), so passing `ALL` only makes the intent
+  explicit. A capability you send replaces the stored one, so a filter left out
+  resets to `ALL`. Otherwise pass a non-empty array: `null`, `[]` and a `'*'`
+  inside an array throw `InvalidParams`.
+- `'never'` and `enabled: false` send nothing else: passing a filter with them
+  throws `InvalidParams`.
+- `memory: { activation: 'always', namespace }` attaches the thread to a memory
+  bag, `memory: { activation: 'never' }` runs it without memory. A message has
+  no memory scope. The bag is frozen for the thread: a follow-up cannot change
+  it.
+- `messageScope` has no `skills` or `memory`, and `chat.send` takes no
+  `threadCapabilities` (the API would answer 422).
+- A message can only narrow what the thread allows. The server answers 422
+  (`APIError`) when it widens an allowlist or targets a capability the thread
+  does not have.
+
+`sourceIds`, `documentIds`, `disabledTools` and `memoryNamespace` still work but
+are deprecated: use `messageScope` and `threadCapabilities.memory` instead. They
+cannot be mixed: `messageScope` with any of the first three, or `memoryNamespace`
+with `threadCapabilities.memory`, throws `InvalidParams`.
 
 ## Examples
 
@@ -362,11 +519,13 @@ Both `chat.start` and `chat.send` accept:
 | `agentId` | `string` | **Required.** The agent to run. |
 | `message` | `string` | **Required.** The user's message (max 30,000 chars). |
 | `name` | `string` | `start` only — names the new thread. |
-| `fileIds` | `string[]` | Attach previously-uploaded files (max 5). |
-| `sourceIds` | `number[]` | Restrict retrieval to specific knowledge sources. |
-| `documentIds` | `string[]` | Restrict retrieval to specific documents. |
-| `disabledTools` | `DisablableTool[]` | Turn tools off: `'web'`, `'company_documents'`, `'mcp:<server>'`, or `'mcp:*'`. |
-| `memoryNamespace` | `string` | `start` only — the thread's memory namespace (max 128 chars), fixed for its whole life. |
+| `fileIds` | `string[]` | Ids of files uploaded with `chat.uploadFile()` (max 5). |
+| `threadCapabilities` | `AgentCapabilities` | `start` only — capability override, frozen for the thread. Includes the memory bag (`memory`). Sent as `options.capabilities`. |
+| `messageScope` | `MessageScope` | Turn capabilities on/off or narrow them for this message. Sent as `message.scope`. |
+| `sourceIds` | `number[]` | **Deprecated** — use `messageScope.indexedDocuments.sourceIds`. |
+| `documentIds` | `string[]` | **Deprecated** — use `messageScope.indexedDocuments.documentIds`. |
+| `disabledTools` | `DisablableTool[]` | **Deprecated** — turn tools off with `messageScope`. |
+| `memoryNamespace` | `string` | `start` only. **Deprecated** — use `threadCapabilities.memory`. |
 | `maxSteps` | `number` | Cap on tool rounds for **this message** (integer `>= 1`). Per message, not per thread; left out, the server default applies (60 today). |
 | `signal` | `AbortSignal` | Cancel the request. |
 

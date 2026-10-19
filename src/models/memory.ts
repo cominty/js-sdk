@@ -206,7 +206,7 @@ function checkChange(errors: InvalidParam[], param: string, value: unknown): voi
 }
 
 /** Length in characters as the API counts them: an emoji is one, not two. */
-function characterCount(value: string): number {
+export function characterCount(value: string): number {
     let count = 0
     for (const _ of value) count++
     return count
