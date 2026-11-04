@@ -9,6 +9,43 @@ are always called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+Ports the resources of the Python SDK 1.2.0.
+
+- `client.sources`: files to an indexed document source in one call.
+  `create(files, { name })` takes `File`s or `{ filename, content }` objects,
+  creates a drive, uploads every file through the presigned flow and creates a
+  private drag-and-drop source over it (`POST /drives`, `GET /drives/{id}/upload`,
+  `POST /drives/upload`, `POST /dc/sources`). `waitSynced(pid, { timeout,
+  interval })` reads the source until it is `synced`, and throws the new
+  `SourceSyncFailed` when it stops elsewhere or `SourceSyncTimeout` when time runs
+  out, both carrying `.source`. `addFiles` and `removeFile` upload or delete and
+  request a sync when the source accepts one; also `list`, `get` (list-and-pick:
+  keys have no single-source read), `update({ name })`, `listFiles`,
+  `downloadFile`, and the status operations `start`, `pause`, `sync` and
+  `archive`. No files, duplicate names or more than 50 files (`SOURCE_MAX_FILES`)
+  throw `InvalidParams` before any upload.
+- `client.agents`: `list`, `listModels`, `get`, `create`, `update` (partial;
+  `null` clears `description`, `instructions` or `capabilities`, and a
+  capabilities object is merged key by key), `setModels` and `delete`. An
+  agent's `capabilities` are read back as camelCase `AgentCapabilities`, so a
+  read can be passed to `update`; a capability the SDK cannot parse is left out
+  of the read instead of failing it. New types `AgentSummary`, `AgentDetail` and
+  `LlmModel`.
+- `client.skills`: `list`, `create(file, { displayName, scope })`, `update`,
+  `uploadVersion` and `delete`. `file` is a zip, or the skill's files by path,
+  zipped in memory with hidden entries left out. Over 30 MB
+  (`SKILL_MAX_BYTES`) throws `InvalidParams`.
+- `client.documents.get(documentId)`: resolves a citation's composite document
+  id to its source and file.
+- `client.mcp.list({ enabled })`: the MCP integrations the key can use
+  (`GET /mcp/manifest`), the enabled ones by default; `enabled: false` keeps the
+  ones that are off, `null` every server. A server's `name` is what
+  `mcp.connections` takes.
+- The `Scope` type (`'private' | 'organization'`) and examples `09-sources.ts` to
+  `12-mcp-servers.ts`.
+
 ## [0.3.0] - 2026-10-19
 
 ### Added

@@ -13,7 +13,11 @@ import { Cominty, type Message, type MessageParams } from '@cominty-ai/sdk'
 - [`AssistantRun`](#assistantrun)
 - [`client.threads`](#clientthreads) — [`list`](#threadslistparams) · [`get`](#threadsgetthreadid-options) · [`update`](#threadsupdatethreadid-params) · [`archive`](#threadsarchivethreadid-options)
 - [`client.memory`](#clientmemory) — [`list`](#memorylistparams) · [`listNamespaces`](#memorylistnamespacesoptions) · [`create`](#memorycreateparams) · [`get`](#memorygetpath-options) · [`update`](#memoryupdatepath-params) · [`delete`](#memorydeletepath-options)
-- [Data types](#data-types) — [`Message`](#message) · [`Thread`](#thread-and-threadsummary) · [`Question`](#question) · [`ConversationFile`](#conversationfile) · [`MemoryFile`](#memoryfile-and-memoryfilesummary)
+- [`client.sources`](#clientsources) — [`create`](#sourcescreatefiles-params) · [`list`](#sourceslistoptions) · [`get`](#sourcesgetsourcepid-options) · [`update`](#sourcesupdatesourcepid-params) · [`addFiles`](#sourcesaddfilessourcepid-files-options) · [`listFiles`](#sourceslistfilessourcepid-options) · [`removeFile`](#sourcesremovefilesourcepid-fileid-options) · [`downloadFile`](#sourcesdownloadfilefileid-options) · [status operations](#status-operations) · [`waitSynced`](#sourceswaitsyncedsourcepid-params)
+- [`client.agents`](#clientagents) — [`list`](#agentslistoptions) · [`listModels`](#agentslistmodelsoptions) · [`get`](#agentsgetagentid-options) · [`create`](#agentscreateparams) · [`update`](#agentsupdateagentid-params) · [`setModels`](#agentssetmodelsagentid-params) · [`delete`](#agentsdeleteagentid-options)
+- [`client.skills`](#clientskills) — [`list`](#skillslistoptions) · [`create`](#skillscreatefile-params) · [`update`](#skillsupdateskillid-params) · [`uploadVersion`](#skillsuploadversionskillid-file-options) · [`delete`](#skillsdeleteskillid-options)
+- [`client.documents`](#clientdocuments) · [`client.mcp`](#clientmcp)
+- [Data types](#data-types) — [`Message`](#message) · [`Thread`](#thread-and-threadsummary) · [`Question`](#question) · [`ConversationFile`](#conversationfile) · [`MemoryFile`](#memoryfile-and-memoryfilesummary) · [`Source`](#source-and-sourcefile) · [`AgentDetail`](#agentdetail-and-agentsummary) · [`Skill`](#skill) · [`DocumentMetadata`](#documentmetadata) · [`McpServer`](#mcpserver)
 - [Events](#events)
 - [Errors](#errors)
 - [Helpers and constants](#helpers-and-constants)
@@ -54,6 +58,11 @@ malformed, or if constructed in a browser without `dangerouslyAllowBrowser`.
 | `chat` | `ChatResource` | Start and continue conversations |
 | `threads` | `ThreadsResource` | List and manage threads |
 | `memory` | `MemoryResource` | Read and write memory files |
+| `sources` | `SourcesResource` | Index files as a document source |
+| `agents` | `AgentsResource` | List agents, manage custom ones |
+| `skills` | `SkillsResource` | Upload the skills an agent can load |
+| `documents` | `DocumentsResource` | Resolve a cited document |
+| `mcp` | `McpResource` | List the MCP integrations a key can use |
 | `userId` | `string` | The user every request acts on behalf of |
 | `baseUrl` | `string` | The resolved API base URL |
 | `close()` | `void` | Abort every in-flight request and stream |
@@ -532,6 +541,346 @@ Delete a file. Not idempotent: a path that is already gone throws
 
 ---
 
+## `client.sources`
+
+Document sources an agent can search. `create` turns files into a private
+drag-and-drop source in one call: it creates the drive behind it, uploads every
+file with a presigned URL (the API key never reaches the storage backend), and
+creates the source, whose first sync starts at once.
+
+Every method takes the source's **`pid`**; capabilities
+(`indexedDocuments.sourceIds`) take its numeric **`id`**. These calls do not send
+the client's `userId`.
+
+> **Known limitation.** Sources created with an API key are private to the admin
+> who minted the key. Chats that search them must use that admin's Clerk id as the
+> client's `userId`: it is `owner` on any agent the key created. With another
+> `userId`, the agent's document tool reports no authorized source.
+
+Files are a `SourceFileInput`: a `File` (its `name` is used), or a `NamedFile`
+`{ filename, content, mimetype? }` whose `content` is a `Blob`, `ArrayBuffer` or
+`Uint8Array`. Checked before any request, with
+[`InvalidParams`](errors.md#invalid-parameters): at least one file, at most 50 in
+the source (`SOURCE_MAX_FILES`), unique names of 1 to 255 characters without `/`.
+A string is refused rather than read as a path; in Node, wrap a file's bytes in a
+`File`.
+
+### `sources.create(files, params?)`
+
+```ts
+create(files: SourceFileInput | readonly SourceFileInput[], params?: CreateSourceParams): Promise<Source>
+```
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Name shown in the console. Left out, the server picks one. |
+| `signal` | `AbortSignal` | Cancels the flow. |
+
+Files are uploaded one after the other. If a step fails (for instance
+`Too many drives`, or a storage refusal) the source is not created, and the drive
+is left to the server's cleanup. The returned source is `pending` or `syncing`:
+await [`waitSynced`](#sourceswaitsyncedsourcepid-params) before searching it.
+
+### `sources.list(options?)`
+
+```ts
+list(options?: { signal?: AbortSignal }): Promise<Source[]>
+```
+
+The organization's sources plus the ones the key created, archived ones included.
+
+### `sources.get(sourcePid, options?)`
+
+```ts
+get(sourcePid: string, options?: { signal?: AbortSignal }): Promise<Source>
+```
+
+The API has no single-source read for keys, so this lists and picks: it costs
+the same as `list`. Throws `NotFoundError` if no visible source has the `pid`.
+
+### `sources.update(sourcePid, params)`
+
+```ts
+update(sourcePid: string, params: { name: string; signal?: AbortSignal }): Promise<Source>
+```
+
+Rename a source. The name is the only field of a drag-and-drop source that can
+change.
+
+### `sources.addFiles(sourcePid, files, options?)`
+
+```ts
+addFiles(sourcePid: string, files: SourceFileInput | readonly SourceFileInput[], options?: { signal?: AbortSignal }): Promise<SourceFile[]>
+```
+
+Upload more files into the source, then request a sync when the source accepts
+one (`synced`, `error`, `out_of_sync`, `daily_quota_reached`). While a sync is
+running, the new files are left for it, or for the daily one, to pick up. The
+50-file cap counts the files already there. Files uploaded before a failure stay
+in the source. Returns the files just added, in upload order.
+
+### `sources.listFiles(sourcePid, options?)`
+
+```ts
+listFiles(sourcePid: string, options?: { signal?: AbortSignal }): Promise<SourceFile[]>
+```
+
+The files the source is built from. A connected source (Google Drive,
+SharePoint) has none, and throws `SDKError`.
+
+### `sources.removeFile(sourcePid, fileId, options?)`
+
+```ts
+removeFile(sourcePid: string, fileId: string, options?: { signal?: AbortSignal }): Promise<void>
+```
+
+Delete a file (`DELETE /files/{fileId}`), then sync under the same rule as
+`addFiles`.
+
+### `sources.downloadFile(fileId, options?)`
+
+```ts
+downloadFile(fileId: string, options?: { signal?: AbortSignal }): Promise<Uint8Array>
+```
+
+The file's bytes, fetched from a short-lived presigned URL without your API key.
+The whole file is held in memory.
+
+### Status operations
+
+```ts
+start(sourcePid: string, options?: { signal?: AbortSignal }): Promise<Source>
+pause(sourcePid: string, options?: { signal?: AbortSignal }): Promise<Source>
+sync(sourcePid: string, options?: { signal?: AbortSignal }): Promise<Source>
+archive(sourcePid: string, options?: { signal?: AbortSignal }): Promise<Source>
+```
+
+Each sends `PUT /dc/sources/{pid}/status?operation=…`. An operation the current
+status does not allow throws an `APIError` (400, `Operation is not valid`).
+
+| Method | Does | Valid from |
+| --- | --- | --- |
+| `start` | Resumes a paused source | `paused` |
+| `pause` | Stops syncing until `start`; a running sync is cancelled | Most statuses |
+| `sync` | Syncs now instead of waiting for the daily sync | `synced`, `error`, `out_of_sync`, `daily_quota_reached` |
+| `archive` | Terminal: removes the indexed documents, keeps the source listed | Anything but `archived` |
+
+### `sources.waitSynced(sourcePid, params?)`
+
+```ts
+waitSynced(sourcePid: string, params?: WaitSyncedParams): Promise<Source>
+```
+
+Reads the source every `interval` while a sync is pending or running, and returns
+it once `synced`.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `timeout` | `number` | Milliseconds to wait at most. Default `600000` (10 minutes). |
+| `interval` | `number` | Milliseconds between two reads. Default `5000`. |
+| `signal` | `AbortSignal` | Aborts the wait. |
+
+Throws `SourceSyncFailed` when the source stops anywhere other than `synced`
+(`error`, `paused`, `archived`, `daily_quota_reached`, ...), and
+`SourceSyncTimeout` once `timeout` has passed. Both carry the last source read as
+`.source` (`null` on a timeout before any read finished). A timeout does not stop
+the sync: wait again to keep following it.
+
+---
+
+## `client.agents`
+
+The agents a key can use: the built-in Cominty agents (`managed: true`), the
+organization's, and the ones owned by the key's creator. Custom agents can be
+created, changed and deleted; built-in ones cannot, and throw `NotFoundError`.
+
+An agent's `capabilities` come back camelCase, in the
+[`AgentCapabilities`](#agentcapabilities) shape you pass, so a read can be sent
+straight back through `update`. A capability this SDK version does not know, or a
+newer shape of a known one, is left out of the read rather than failing it; the
+API keeps it on update, since it merges capabilities key by key.
+
+### `agents.list(options?)`
+
+```ts
+list(options?: { signal?: AbortSignal }): Promise<AgentSummary[]>
+```
+
+Summaries, without `instructions` or `models`.
+
+### `agents.listModels(options?)`
+
+```ts
+listModels(options?: { signal?: AbortSignal }): Promise<LlmModel[]>
+```
+
+The language models an agent can run on: their ids go in `modelIds`.
+
+### `agents.get(agentId, options?)`
+
+```ts
+get(agentId: string, options?: { signal?: AbortSignal }): Promise<AgentDetail>
+```
+
+### `agents.create(params)`
+
+```ts
+create(params: CreateAgentParams): Promise<AgentDetail>
+```
+
+The agent is owned by the admin who minted the API key (`owner`).
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | **Required.** Display name, not empty. |
+| `description` | `string` | At most 500 characters. |
+| `instructions` | `string` | System instructions, at most 30 000 characters. |
+| `scope` | `Scope` | `'private'` (default, the owner only) or `'organization'`. |
+| `capabilities` | `AgentCapabilities` | Left-out capabilities keep the platform defaults. `memory` sets the agent's namespace. |
+| `allowExecutionOptionsOverride` | `boolean` | Let a chat override the agent's tools. Default `false`. |
+| `modelIds` | `string[]` | Model chain in failover order. Left out, the organization's default. |
+| `signal` | `AbortSignal` | Cancels the request. |
+
+A `skills.include` naming a skill the key cannot read comes back as an
+`APIError` (422).
+
+### `agents.update(agentId, params)`
+
+```ts
+update(agentId: string, params: UpdateAgentParams): Promise<AgentDetail>
+```
+
+Partial: only the fields you pass are sent, and at least one is needed. Takes the
+fields of `create` except `modelIds` (see `setModels`). `description`,
+`instructions` and `capabilities` accept `null` to clear them; `null` on `name`,
+`scope` or `allowExecutionOptionsOverride` throws `InvalidParams`. A
+`capabilities` object is merged key by key: each capability you pass replaces the
+stored one, the others stay.
+
+### `agents.setModels(agentId, params)`
+
+```ts
+setModels(agentId: string, params: { modelIds: readonly string[]; signal?: AbortSignal }): Promise<AgentDetail>
+```
+
+Replace the model chain: at least one id, in failover order. On a built-in agent,
+this sets the organization's chain for that agent's tier instead. An unknown
+model id throws `NotFoundError`.
+
+### `agents.delete(agentId, options?)`
+
+```ts
+delete(agentId: string, options?: { signal?: AbortSignal }): Promise<void>
+```
+
+Permanent. Messages the agent handled keep working and report their agent as
+`ARCHIVED`.
+
+---
+
+## `client.skills`
+
+A skill is a folder whose `SKILL.md` opens with YAML frontmatter (`name`,
+`description`, and optionally `license`, `compatibility`, `metadata`,
+`allowed-tools`, per the [agentskills.io](https://agentskills.io/specification)
+specification), plus any supporting files. Give one to an agent with
+`capabilities.skills.include`.
+
+`create` and `uploadVersion` take a `SkillArchive`:
+
+- a zip archive (`Blob`, `File`, `ArrayBuffer`, `Uint8Array`), sent as it is;
+- or a `SkillFiles` object, the skill's files by `/`-separated path with
+  `SKILL.md` at the root, zipped in memory. A string value is written as UTF-8.
+  Entries with a path part starting with `.` are left out, as when zipping a
+  folder.
+
+An archive over 30 MB (`SKILL_MAX_BYTES`), a files object with no `SKILL.md` or
+with an absolute or climbing (`..`) path, and a plain string all throw
+`InvalidParams` before anything is sent. The server checks the frontmatter and
+the layout: a refusal is an `APIError` (422) with the reason, a too-large archive
+a 413.
+
+### `skills.list(options?)`
+
+```ts
+list(options?: { signal?: AbortSignal }): Promise<Skill[]>
+```
+
+The built-in skills (`source: 'cominty'`), the organization's custom skills, and
+the ones owned by the key's creator, each with its default version's
+frontmatter.
+
+### `skills.create(file, params)`
+
+```ts
+create(file: SkillArchive, params: CreateSkillParams): Promise<Skill>
+```
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `displayName` | `string` | **Required.** 1 to 100 characters. |
+| `scope` | `Scope` | `'private'` (default) or `'organization'`. |
+| `signal` | `AbortSignal` | Cancels the upload. |
+
+### `skills.update(skillId, params)`
+
+```ts
+update(skillId: string, params: UpdateSkillParams): Promise<Skill>
+```
+
+Partial: `displayName`, `active` (whether agents may use the skill) or `scope`,
+at least one. A built-in skill throws `NotFoundError`.
+
+### `skills.uploadVersion(skillId, file, options?)`
+
+```ts
+uploadVersion(skillId: string, file: SkillArchive, options?: { signal?: AbortSignal }): Promise<Skill>
+```
+
+Upload a new version and make it the default. Versions are tagged to the second:
+two uploads of the same skill within one second collide (500), so space them out.
+
+### `skills.delete(skillId, options?)`
+
+```ts
+delete(skillId: string, options?: { signal?: AbortSignal }): Promise<void>
+```
+
+Permanent, every version included.
+
+---
+
+## `client.documents`
+
+### `documents.get(documentId, options?)`
+
+```ts
+get(documentId: string, options?: { signal?: AbortSignal }): Promise<DocumentMetadata>
+```
+
+Resolve the composite document id of an agent citation to its source and file.
+The id may contain `#`: it is sent URL-encoded. An id unknown to the key's
+organization throws `NotFoundError`.
+
+---
+
+## `client.mcp`
+
+### `mcp.list(params?)`
+
+```ts
+list(params?: { enabled?: boolean | null; signal?: AbortSignal }): Promise<McpServer[]>
+```
+
+The MCP integrations this key can use (`GET /mcp/manifest`). A server's `name` is
+what `mcp.connections` takes, in `threadCapabilities`, `messageScope` or an
+agent's `capabilities`. The endpoint returns every server; `enabled` filters on
+`is_enabled` in the SDK: `true` (default) keeps the ones turned on, `false` only
+the ones that are off, `null` every server. Leave servers that are off out of
+`connections`.
+
+---
+
 ## Data types
 
 Response types are open-ended: the API may return fields that are not listed
@@ -610,6 +959,85 @@ and `McpScope`.
 Supporting types: `ListMemoryFilesParams`, `CreateMemoryFileParams`,
 `UpdateMemoryFileParams`.
 
+### `Source` and `SourceFile`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | `number` | The id `indexedDocuments.sourceIds` takes |
+| `pid` | `string` | The id every `client.sources` method takes |
+| `name` | `string` |  |
+| `status` | `SourceStatus` | `pending`, `syncing`, `synced`, `error`, `paused`, `archived`, ... |
+| `store` | `SourceStore` | `draganddrop`, `googledrive` or `sharepoint` |
+| `scope` | `Scope` |  |
+| `config` | `Record<string, unknown>` | `{ meta, values }`; `values.drive_id` names the drive behind the source |
+| `documents_synced`, `documents_failed`, `documents_embedded`, `oversized_documents` | `number` | Counts from the last sync |
+| `size`, `embedded_size` | `number` | Bytes |
+| `created_at`, `created_by` | `string` |  |
+| `last_synced_at`, `archived_at` | `string \| null` | ISO-8601 timestamps |
+
+A `SourceFile` has `id`, `name`, `size`, `mimetype`, `created_at` and
+`updated_at`.
+
+Supporting types: `SourceFileInput`, `NamedFile`, `CreateSourceParams`,
+`UpdateSourceParams`, `WaitSyncedParams`.
+
+### `AgentDetail` and `AgentSummary`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id`, `name` | `string` |  |
+| `description` | `string \| null` |  |
+| `capabilities` | `AgentCapabilities \| null` | **camelCase**, the shape you pass |
+| `managed` | `boolean` | `true` for the built-in agents |
+| `scope` | `Scope` |  |
+| `owner` | `string` | The creator's Clerk id: for a key's agent, the admin who minted the key |
+| `execution_options` | `object \| null` | Legacy: use `capabilities` |
+| `memory_namespace` | `string \| null` | Legacy: use `capabilities.memory` |
+| `instructions` | `string \| null` | **`AgentDetail` only** |
+| `allow_execution_options_override` | `boolean` | **`AgentDetail` only** |
+| `models` | `LlmModel[]` | **`AgentDetail` only.** `{ id, name }`, in failover order |
+
+Supporting types: `CreateAgentParams`, `UpdateAgentParams`, `SetAgentModelsParams`.
+
+### `Skill`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | `string` | The id `skills.include` takes |
+| `display_name` | `string` |  |
+| `active` | `boolean` | Whether agents may use it |
+| `scope` | `Scope \| null` | `null` for built-in skills |
+| `source` | `SkillSource` | `'cominty'` (built in, read-only) or `'custom'` |
+| `frontmatter` | `SkillFrontmatter` | `name`, `description`, `license`, `compatibility`, `metadata`, `allowed_tools` |
+| `created_at` | `string` |  |
+| `updated_at` | `string` | When the default version was uploaded |
+
+Supporting types: `SkillArchive`, `SkillFiles`, `CreateSkillParams`,
+`UpdateSkillParams`.
+
+### `DocumentMetadata`
+
+`document_id`, `document_name`, `document_extension`, `document_mime_type`,
+`document_uri` (or `null`), and its source: `source_id`, `source_pid` and
+`source_type` (a `SourceStore`).
+
+### `McpServer`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Stable id: the value `mcp.connections` takes |
+| `title`, `description` | `string` | What to show |
+| `is_enabled` | `boolean` | Turned on for this caller |
+| `origin` | `string` | `builtin` or `remote` today; others may appear |
+| `scope` | `string` | `organization` or `user` today |
+| `requires_oauth_connect` | `boolean` | The user must connect OAuth before it can be used |
+
+Optional, absent when the API leaves them out: `connection_status`, `icon_uri`,
+`mcp_url`, `owner_id`, `created_at`, `updated_at`. Supporting type:
+`ListMcpServersParams`.
+
+`Scope`, used by sources, agents and skills, is `'private' | 'organization'`.
+
 ---
 
 ## Events
@@ -650,6 +1078,8 @@ Described in full in the [error handling guide](errors.md).
 | `ServerError` | 5xx | |
 | `APIConnectionError` | No response arrived | `cause` |
 | `StreamInterrupted` | The server shut down mid-stream | `partial` |
+| `SourceSyncFailed` | `sources.waitSynced` saw the source stop | `source` |
+| `SourceSyncTimeout` | `sources.waitSynced` ran out of time | `source` (or `null`) |
 | `InvalidParams` | Arguments failed validation | `errors` |
 | `SDKError` | Unexpected state, or a run consumed twice | |
 
@@ -671,5 +1101,10 @@ Supporting types: `ErrorDetail`, `InvalidParam`, `RateLimitScope`.
 | `MAX_FILES` | `5` — maximum `fileIds` per message |
 | `ALL` | `'*'` — the "no restriction" filter of a capability or scope |
 | `UPLOAD_MAX_BYTES` | `524288000` (500 MiB) — maximum `chat.uploadFile` size |
+| `SOURCE_MAX_FILES` | `50` — maximum files in one source |
+| `SKILL_MAX_BYTES` | `31457280` (30 MB) — maximum skill archive size |
+| `SKILL_DISPLAY_NAME_MAX_LENGTH` | `100` — maximum skill `displayName` length |
+| `AGENT_DESCRIPTION_MAX_LENGTH` | `500` — maximum agent `description` length |
+| `AGENT_INSTRUCTIONS_MAX_LENGTH` | `30000` — maximum agent `instructions` length |
 | `DISABLE_ALL_MCP` | `'mcp:*'` — **deprecated**, with `disabledTools` |
 | `DISABLE_MCP_PREFIX` | `'mcp:'` — **deprecated**, with `disabledTools` |

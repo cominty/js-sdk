@@ -29,5 +29,9 @@ and run `node --env-file=.env examples/01-stream-events.ts`.
 | `06-manage-thread.ts` | Get, rename/star, archive |
 | `07-max-steps.ts` | Cap tool rounds for one message, then continue past the cap |
 | `08-memory-files.ts` | Create, list, update and delete memory files; start a thread in their namespace |
+| `09-sources.ts` | Index a local folder, give it to an agent, ask about it |
+| `10-agents.ts` | Create, update and delete a custom agent |
+| `11-skills.ts` | Upload a skill folder and attach it to an agent |
+| `12-mcp-servers.ts` | List MCP servers and attach the enabled ones to an agent |
 
 **These hit the real API and cost real credits.**

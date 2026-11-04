@@ -164,3 +164,108 @@ export function eventLine(name: string, over: Record<string, unknown> = {}): str
         ...over,
     })}\n`
 }
+
+export const SOURCE_PID = 'src_V1StGXR8Z5'
+export const DRIVE_ID = 'drv_1'
+
+export function source(overrides: Record<string, unknown> = {}) {
+    return {
+        id: 42,
+        pid: SOURCE_PID,
+        created_at: '2026-11-01T10:00:00Z',
+        name: 'Product docs',
+        scope: 'private',
+        created_by: USER_ID,
+        store: 'draganddrop',
+        status: 'syncing',
+        size: 0,
+        embedded_size: 0,
+        config: { meta: {}, values: { drive_id: DRIVE_ID } },
+        documents_synced: 0,
+        documents_failed: 0,
+        oversized_documents: 0,
+        documents_embedded: 0,
+        last_synced_at: null,
+        archived_at: null,
+        ...overrides,
+    }
+}
+
+export function sourceFile(overrides: Record<string, unknown> = {}) {
+    return {
+        id: 'fil_1',
+        created_at: '2026-11-01T10:00:00Z',
+        updated_at: '2026-11-01T10:00:00Z',
+        name: 'faq.md',
+        size: 5,
+        mimetype: 'text/markdown',
+        ...overrides,
+    }
+}
+
+/** The answer of a presigned-permission endpoint. */
+export function uploadPermission(key = 'uploads/key') {
+    return {
+        url: 'https://bucket.example/upload?X-Amz-Signature=secret',
+        fields: { key, policy: 'p' },
+    }
+}
+
+/** The storage backend's answer to a presigned upload. */
+export function storageAccepted(etag = '"etag-1"'): Response {
+    return new Response(null, { status: 204, headers: { etag } })
+}
+
+export const AGENT_OWNER = 'user_31HPTBuBvX20xlQNAbvxjOxPbKB'
+
+export function agentWire(overrides: Record<string, unknown> = {}) {
+    return {
+        id: 'agt_V1StGXR8_Z5jdHi6B',
+        name: 'Support',
+        description: 'Answers support tickets',
+        capabilities: null,
+        execution_options: null,
+        memory_namespace: null,
+        managed: false,
+        scope: 'private',
+        owner: AGENT_OWNER,
+        instructions: 'Be brief.',
+        allow_execution_options_override: false,
+        models: [{ id: 'mdl_1', name: 'claude-sonnet' }],
+        ...overrides,
+    }
+}
+
+export function skill(overrides: Record<string, unknown> = {}) {
+    return {
+        id: 'skl_1',
+        created_at: '2026-11-01T10:00:00Z',
+        updated_at: '2026-11-01T10:00:00Z',
+        display_name: 'Release notes',
+        active: true,
+        scope: 'private',
+        source: 'custom',
+        frontmatter: {
+            name: 'release-notes',
+            description: 'Drafts release notes',
+            license: null,
+            compatibility: null,
+            metadata: {},
+            allowed_tools: [],
+        },
+        ...overrides,
+    }
+}
+
+export function mcpServer(overrides: Record<string, unknown> = {}) {
+    return {
+        name: 'linear',
+        title: 'Linear',
+        description: 'Issues and projects',
+        is_enabled: true,
+        origin: 'remote',
+        scope: 'organization',
+        requires_oauth_connect: false,
+        ...overrides,
+    }
+}

@@ -14,6 +14,7 @@
  */
 
 import type { InvalidParam } from '../errors.ts'
+import { checkKeys, isObject } from './common.ts'
 import { checkNamespace } from './memory.ts'
 
 /**
@@ -198,7 +199,7 @@ export function buildCapabilities(
         })
         return undefined
     }
-    checkKeys(errors, param, value, Object.keys(CAPABILITIES))
+    checkKeys(errors, value, Object.keys(CAPABILITIES), `${param}.`)
 
     const wire: Wire = {}
     for (const [name, spec] of Object.entries(CAPABILITIES)) {
@@ -234,7 +235,7 @@ export function buildScope(
         if (key in THREAD_ONLY)
             errors.push({ param: `${param}.${key}`, message: THREAD_ONLY[key]! })
     }
-    checkKeys(errors, param, value, [...Object.keys(SCOPES), ...Object.keys(THREAD_ONLY)])
+    checkKeys(errors, value, [...Object.keys(SCOPES), ...Object.keys(THREAD_ONLY)], `${param}.`)
 
     const wire: Wire = {}
     for (const [name, spec] of Object.entries(SCOPES)) {
@@ -261,7 +262,7 @@ function capability(
         })
         return undefined
     }
-    checkKeys(errors, param, value, ['activation', ...spec.filters.map((f) => f.key)])
+    checkKeys(errors, value, ['activation', ...spec.filters.map((f) => f.key)], `${param}.`)
     const activation = checkActivation(errors, param, name, spec.activations, value.activation)
 
     const wire: Wire = { activation }
@@ -294,7 +295,7 @@ function memoryCapability(errors: InvalidParam[], param: string, value: unknown)
         })
         return undefined
     }
-    checkKeys(errors, param, value, ['activation', 'namespace'])
+    checkKeys(errors, value, ['activation', 'namespace'], `${param}.`)
     const activation = checkActivation(errors, param, 'memory', INSTALLED_OR_NOT, value.activation)
     const namespace = value.namespace
 
@@ -339,7 +340,7 @@ function scope(
         errors.push({ param, message: 'must be an object like { enabled: true }', input: value })
         return undefined
     }
-    checkKeys(errors, param, value, ['enabled', ...spec.filters.map((f) => f.key)])
+    checkKeys(errors, value, ['enabled', ...spec.filters.map((f) => f.key)], `${param}.`)
     const enabled = value.enabled
     if (typeof enabled !== 'boolean') {
         errors.push({
@@ -431,25 +432,34 @@ function allowList(
     return value
 }
 
-/** Refuse keys outside `allowed`, pointing a snake_case one to its camelCase name. */
-function checkKeys(
-    errors: InvalidParam[],
-    param: string,
-    value: Record<string, unknown>,
-    allowed: readonly string[],
-): void {
-    for (const key of Object.keys(value)) {
-        if (allowed.includes(key)) continue
-        const camel = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
-        errors.push({
-            param: `${param}.${key}`,
-            message: allowed.includes(camel)
-                ? `unknown key: arguments are camelCase, use '${camel}'`
-                : `unknown key, expected one of ${allowed.join(', ')}`,
-        })
-    }
-}
+// ── Reading them back ─────────────────────────────────────────────────────── //
 
-function isObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
+/**
+ * Turn the wire capabilities of an agent the API returned into the camelCase
+ * {@link AgentCapabilities} the SDK takes, so a read can be passed back to
+ * `agents.update` as it is.
+ *
+ * A capability this SDK version does not know, or a newer shape of a known one,
+ * is left out rather than failing the read. Sending the result back is still
+ * safe: the API merges capabilities key by key and keeps the ones left out.
+ */
+export function parseCapabilities(wire: unknown): AgentCapabilities | null {
+    if (!isObject(wire)) return null
+    const parsed: Record<string, unknown> = {}
+    for (const [name, spec] of Object.entries(CAPABILITIES)) {
+        const raw = wire[spec.wire]
+        if (!isObject(raw)) continue
+        const entry: Record<string, unknown> = {}
+        for (const [key, value] of Object.entries(raw)) {
+            // A null field is the API's way of leaving it out.
+            if (value === null) continue
+            const filter = spec.filters.find((f) => f.wire === key)
+            entry[filter ? filter.key : key] = value
+        }
+        // Keep only what the SDK would accept as an argument.
+        const errors: InvalidParam[] = []
+        buildCapabilities(errors, 'capabilities', { [name]: entry })
+        if (errors.length === 0) parsed[name] = entry
+    }
+    return parsed as AgentCapabilities
 }

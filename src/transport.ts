@@ -14,6 +14,8 @@ const TOKEN_HEADER = 'x-cominty-token'
 
 export interface RequestOptions {
     json?: unknown
+    /** A multipart body. `fetch` sets its content type, boundary included. */
+    form?: FormData
     params?: Record<string, unknown>
     headers?: Record<string, string>
     signal?: AbortSignal
@@ -46,7 +48,9 @@ export class Transport {
             response = await this.#config.fetch(this.#url(path, options.params), {
                 method,
                 headers: this.#headers(options.json !== undefined, options.headers),
-                body: options.json === undefined ? undefined : JSON.stringify(options.json),
+                body:
+                    options.form ??
+                    (options.json === undefined ? undefined : JSON.stringify(options.json)),
                 signal: controller.signal,
             })
         } catch (cause) {

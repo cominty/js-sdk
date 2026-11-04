@@ -6,8 +6,9 @@
 
 Official TypeScript client for the Cominty managed agent chat API.
 
-Start a conversation with an agent, stream its progress live, and manage threads
-— with a small, fully-typed surface and **zero runtime dependencies**.
+Start a conversation with an agent, stream its progress live, manage threads, and
+set up agents, skills and indexed sources — with a small, fully-typed surface and
+**zero runtime dependencies**.
 
 ```ts
 import { Cominty } from '@cominty-ai/sdk'
@@ -33,7 +34,7 @@ track the same API and the same release cadence.
 ## Contents
 
 - [Requirements](#requirements) · [Installation](#installation) · [Authentication](#authentication)
-- [Quick start](#quick-start) · [Capabilities](#capabilities)
+- [Quick start](#quick-start) · [Index files](#index-files-for-an-agent) · [Agents](#agents) · [Skills](#skills) · [Capabilities](#capabilities)
 - [Message parameters](#message-parameters) · [Configuration](#configuration) · [Error handling](#error-handling)
 - [Examples](#examples) · [Contributing](#contributing)
 
@@ -407,6 +408,132 @@ unchanged; `update` cannot clear a field, so `null` throws `InvalidParams`; and
 `delete` is not idempotent — a path already gone throws `NotFoundError`. The
 [API reference](docs/api.md#clientmemory) has every method.
 
+### Index files for an agent
+
+`client.sources` turns files into a searchable document source in one call. The
+SDK creates the drive, uploads every file with a presigned URL (your API key
+never reaches the storage backend), creates a private drag-and-drop source over
+it, and the first sync starts. Pass `File`s, or `{ filename, content }` objects
+whose `content` is a `Blob`, `ArrayBuffer` or `Uint8Array`.
+
+```ts
+import { readdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const dir = './knowledge'
+const files = await Promise.all(
+    (await readdir(dir)).map(async (name) => new File([await readFile(join(dir, name))], name)),
+)
+
+let source = await client.sources.create(files, { name: 'Product docs' })
+source = await client.sources.waitSynced(source.pid) // polls until status is 'synced'
+
+// Capabilities take the numeric `id`; every sources method takes `pid`.
+const agent = await client.agents.create({
+    name: 'Docs assistant',
+    capabilities: { indexedDocuments: { activation: 'always', sourceIds: [source.id] } },
+})
+
+// Add or remove files later: the source is re-synced for you.
+await client.sources.addFiles(source.pid, [{ filename: 'faq.md', content: faqBytes }])
+for (const file of await client.sources.listFiles(source.pid)) console.log(file.name, file.size)
+await client.sources.removeFile(source.pid, fileId)
+const bytes = await client.sources.downloadFile(fileId)
+
+await client.sources.pause(source.pid) // also start(), sync(), archive()
+```
+
+A source holds at most 50 files with unique names, checked before the first
+upload. `waitSynced` throws `SourceSyncFailed` (with `.source`) if the source
+stops in `error`, `paused`, `archived` or `daily_quota_reached`, and
+`SourceSyncTimeout` after `timeout` milliseconds (10 minutes by default).
+
+> **Known limitation.** Sources created with an API key are private to the admin
+> who minted the key. A chat that searches them must use that admin's Clerk id as
+> the client's `userId`: it is `owner` on any agent the key created. With another
+> `userId`, the agent's document tool reports no authorized source.
+
+### Agents
+
+`client.agents` lists the agents a key can use (the built-in Cominty agents, the
+organization's, and the key owner's own) and manages custom ones.
+
+```ts
+for (const a of await client.agents.list()) console.log(a.id, a.name, a.managed, a.scope)
+
+const models = await client.agents.listModels() // the selectable models
+
+let agent = await client.agents.create({
+    name: 'Support',
+    instructions: 'Answer from the docs. Be brief.',
+    scope: 'organization', // default 'private'
+    capabilities: { web: { activation: 'never' } },
+    modelIds: [models[0]!.id], // failover chain; leave out for the default
+})
+
+// Partial update: only what you pass is sent. `null` clears description,
+// instructions or capabilities; a capabilities object is merged key by key.
+agent = await client.agents.update(agent.id, { instructions: null })
+agent = await client.agents.setModels(agent.id, { modelIds: [models[1]!.id, models[0]!.id] })
+await client.agents.delete(agent.id) // permanent
+```
+
+An agent's `capabilities` come back in the same camelCase shape you pass, so a
+read can go straight back into `update`. A capability this SDK version does not
+know is left out of the read, and the API keeps it on update: it merges
+capabilities key by key.
+
+### Skills
+
+A skill is a folder with a `SKILL.md` (YAML frontmatter per the
+[agentskills.io](https://agentskills.io/specification) specification) plus any
+supporting files. Pass a zip as it is, or the files by path and the SDK zips
+them in memory; entries whose path has a part starting with `.` are left out.
+
+```ts
+const skill = await client.skills.create(
+    {
+        'SKILL.md': '---\nname: release-notes\ndescription: Drafts release notes\n---\n…',
+        'templates/notes.md': await readFile('./templates/notes.md'),
+    },
+    { displayName: 'Release notes' },
+)
+console.log(skill.frontmatter.name, skill.source) // parsed by the server; 'custom'
+
+// Give it to an agent
+await client.agents.update(agent.id, {
+    capabilities: { skills: { activation: 'always', include: [skill.id] } },
+})
+
+await client.skills.update(skill.id, { active: false }) // or displayName, scope
+await client.skills.uploadVersion(skill.id, await readFile('./release-notes.zip'))
+await client.skills.delete(skill.id) // permanent, every version
+```
+
+An archive is at most 30 MB, checked before upload. Frontmatter and zip-layout
+errors come back from the server as an `APIError` (422) with the reason. Two
+`uploadVersion` calls on the same skill within one second collide: space them
+out.
+
+### Documents and MCP servers
+
+Agent citations carry a composite document id. `client.documents.get(documentId)`
+resolves it to its source (`source_pid`, `source_type`) and file
+(`document_name`, `document_mime_type`).
+
+`client.mcp.list()` returns the MCP integrations this key can use. A server's
+`name` is what `mcp.connections` takes:
+
+```ts
+const servers = await client.mcp.list() // turned on for this key
+const everything = await client.mcp.list({ enabled: null }) // the ones that are off too
+
+await client.agents.create({
+    name: 'Linear helper',
+    capabilities: { mcp: { activation: 'always', connections: servers.map((s) => s.name) } },
+})
+```
+
 ### Reattach to a run in flight
 
 `chat.stream(messageId)` opens a stream without starting anything — useful for
@@ -500,6 +627,10 @@ Runnable scripts live in [`examples/`](examples/):
 | [`06-manage-thread.ts`](examples/06-manage-thread.ts) | Get, rename/star, archive |
 | [`07-max-steps.ts`](examples/07-max-steps.ts) | Cap tool rounds for one message, then continue past the cap |
 | [`08-memory-files.ts`](examples/08-memory-files.ts) | Create, list, update and delete memory files; start a thread in their namespace |
+| [`09-sources.ts`](examples/09-sources.ts) | Index a local folder, give it to an agent, ask about it |
+| [`10-agents.ts`](examples/10-agents.ts) | Create, update and delete a custom agent |
+| [`11-skills.ts`](examples/11-skills.ts) | Upload a skill folder and attach it to an agent |
+| [`12-mcp-servers.ts`](examples/12-mcp-servers.ts) | List MCP servers and attach the enabled ones to an agent |
 
 ```bash
 git clone https://github.com/cominty/js-sdk.git && cd js-sdk

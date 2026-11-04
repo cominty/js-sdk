@@ -47,7 +47,9 @@ src/
 ├── events.ts        Stream event types
 ├── errors.ts        Error hierarchy
 ├── models/          Request/response types, validation, camelCase → snake_case mapping
-└── resources/       client.chat, client.threads and client.memory
+├── uploads.ts       The presigned upload flow shared by chat and sources
+├── zip.ts           In-memory zip of a skill's files
+└── resources/       client.chat, .threads, .memory, .sources, .agents, .skills, .documents and .mcp
 ```
 
 ## Guidelines

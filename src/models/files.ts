@@ -51,6 +51,38 @@ export interface PreparedUpload {
 export function prepareUpload(file: unknown, params: UploadFileParams): PreparedUpload {
     const { filename, mimetype } = params ?? {}
     const errors: InvalidParam[] = []
+    const upload = collectUpload(errors, UPLOAD_PARAMS, file, filename, mimetype, UPLOAD_MAX_BYTES)
+    if (errors.length > 0) throw new InvalidParams('chat.uploadFile', errors)
+    return upload!
+}
+
+/** The argument names an upload's problems are reported under. */
+export interface UploadParamNames {
+    file: string
+    filename: string
+    mimetype: string
+}
+
+const UPLOAD_PARAMS: UploadParamNames = {
+    file: 'file',
+    filename: 'filename',
+    mimetype: 'mimetype',
+}
+
+/**
+ * Check one file to upload, pushing its problems to `errors` under `names`, and
+ * return it ready to send, or `undefined` if anything was wrong with it.
+ * `maxBytes` left out means no local size check.
+ */
+export function collectUpload(
+    errors: InvalidParam[],
+    names: UploadParamNames,
+    file: unknown,
+    filename: unknown,
+    mimetype: unknown,
+    maxBytes?: number,
+): PreparedUpload | undefined {
+    const before = errors.length
 
     const blob = toBlob(file)
     if (blob === undefined) {
@@ -60,40 +92,47 @@ export function prepareUpload(file: unknown, params: UploadFileParams): Prepared
                   'with await fs.openAsBlob(path)'
                 : ''
         errors.push({
-            param: 'file',
+            param: names.file,
             message: `must be a Blob, File, ArrayBuffer or Uint8Array, got ${typeName(file)}${hint}`,
         })
-    } else if (blob.size > UPLOAD_MAX_BYTES) {
+    } else if (maxBytes !== undefined && blob.size > maxBytes) {
         errors.push({
-            param: 'file',
-            message: `is ${blob.size} bytes, over the ${UPLOAD_MAX_BYTES} bytes (500 MiB) the API accepts`,
+            param: names.file,
+            message: `is ${blob.size} bytes, over the ${maxBytes} bytes (500 MiB) the API accepts`,
         })
     }
 
     const name = filename ?? fileName(file)
     if (name === undefined) {
-        errors.push({ param: 'filename', message: 'required unless file is a File with a name' })
+        errors.push({
+            param: names.filename,
+            message: 'required unless file is a File with a name',
+        })
     } else if (typeof name !== 'string') {
-        errors.push({ param: 'filename', message: 'must be a string', input: name })
+        errors.push({ param: names.filename, message: 'must be a string', input: name })
     } else if (name === '') {
-        errors.push({ param: 'filename', message: 'must not be empty', input: name })
+        errors.push({ param: names.filename, message: 'must not be empty', input: name })
     } else if (name.includes('/')) {
-        errors.push({ param: 'filename', message: "must not contain '/'", input: name })
+        errors.push({ param: names.filename, message: "must not contain '/'", input: name })
     } else if (characterCount(name) > FILENAME_MAX_LENGTH) {
         errors.push({
-            param: 'filename',
+            param: names.filename,
             message: `must be at most ${FILENAME_MAX_LENGTH} characters, got ${characterCount(name)}`,
         })
     }
 
     if (mimetype !== undefined && (typeof mimetype !== 'string' || mimetype === '')) {
-        errors.push({ param: 'mimetype', message: 'must be a non-empty string', input: mimetype })
+        errors.push({
+            param: names.mimetype,
+            message: 'must be a non-empty string',
+            input: mimetype,
+        })
     }
 
-    if (errors.length > 0) throw new InvalidParams('chat.uploadFile', errors)
+    if (errors.length > before) return undefined
 
     const resolvedName = name as string
-    const type = mimetype ?? (blob!.type || guessMimetype(resolvedName))
+    const type = (mimetype as string | undefined) ?? (blob!.type || guessMimetype(resolvedName))
     // The part's content type is the Blob's: re-label it without copying the bytes.
     const labelled = blob!.type === type ? blob! : blob!.slice(0, blob!.size, type)
     return { blob: labelled, filename: resolvedName, mimetype: type }
@@ -105,8 +144,11 @@ export interface FileUploadPermission {
     fields: Record<string, string>
 }
 
-/** Check the upload permission the API answered with. */
-export function readUploadPermission(raw: unknown): FileUploadPermission & { key: string } {
+/** Check the upload permission the API answered `GET {path}` with. */
+export function readUploadPermission(
+    raw: unknown,
+    path = '/chat/files/upload',
+): FileUploadPermission & { key: string } {
     const value = raw as { url?: unknown; fields?: unknown } | null
     const fields = value?.fields as Record<string, unknown> | null | undefined
     if (
@@ -117,7 +159,7 @@ export function readUploadPermission(raw: unknown): FileUploadPermission & { key
     ) {
         // Not the raw answer: its fields hold the presigned signature.
         throw new SDKError(
-            'GET /chat/files/upload did not answer with a presigned upload ' +
+            `GET ${path} did not answer with a presigned upload ` +
                 '(expected a url and fields containing a key)',
         )
     }
@@ -126,17 +168,17 @@ export function readUploadPermission(raw: unknown): FileUploadPermission & { key
     return { url: value.url, fields: strings, key: fields.key }
 }
 
-/** Validate the id of `chat.downloadFile`. */
-export function checkFileId(fileId: unknown): string {
+/** Validate the id of `chat.downloadFile` or `sources.downloadFile`. */
+export function checkFileId(fileId: unknown, context = 'chat.downloadFile'): string {
     if (typeof fileId !== 'string' || fileId === '') {
-        throw new InvalidParams('chat.downloadFile', [
+        throw new InvalidParams(context, [
             { param: 'fileId', message: 'required, must be a non-empty string', input: fileId },
         ])
     }
     return fileId
 }
 
-function toBlob(file: unknown): Blob | undefined {
+export function toBlob(file: unknown): Blob | undefined {
     if (file instanceof Blob) return file
     if (file instanceof ArrayBuffer || ArrayBuffer.isView(file)) {
         return new Blob([file as BlobPart])
@@ -150,7 +192,7 @@ function fileName(file: unknown): string | undefined {
     return typeof name === 'string' && name !== '' ? name : undefined
 }
 
-function typeName(value: unknown): string {
+export function typeName(value: unknown): string {
     if (value === null) return 'null'
     if (typeof value === 'object') return value.constructor?.name ?? 'object'
     return typeof value

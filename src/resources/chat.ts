@@ -16,12 +16,12 @@ import {
 import {
     checkFileId,
     prepareUpload,
-    readUploadPermission,
     type UploadFileParams,
     type UploadSource,
 } from '../models/files.ts'
 import { AssistantRun, StartedChat } from '../streaming.ts'
 import type { Transport } from '../transport.ts'
+import { presignedUpload } from '../uploads.ts'
 
 export class ChatResource {
     readonly #transport: Transport
@@ -165,24 +165,12 @@ export class ChatResource {
      */
     async uploadFile(file: UploadSource, params: UploadFileParams = {}): Promise<ConversationFile> {
         const upload = prepareUpload(file, params)
-        const signal = params.signal
-
-        const permission = readUploadPermission(
-            await this.#transport.request<unknown>('GET', '/chat/files/upload', {
-                params: { filename: upload.filename, mimetype: upload.mimetype },
-                signal,
-            }),
+        return presignedUpload<ConversationFile>(
+            this.#transport,
+            upload,
+            { permission: '/chat/files/upload', confirm: '/chat/files' },
+            params.signal,
         )
-        // The presigned fields first: S3 ignores any field after the file.
-        const form = new FormData()
-        for (const [name, value] of Object.entries(permission.fields)) form.append(name, value)
-        form.append('file', upload.blob, upload.filename)
-        const etag = await this.#transport.uploadToPresignedUrl(permission.url, form, signal)
-
-        return this.#transport.request<ConversationFile>('POST', '/chat/files', {
-            json: { etag, key: permission.key },
-            signal,
-        })
     }
 
     /**

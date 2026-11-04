@@ -28,6 +28,8 @@ export {
     RateLimitError,
     SDKError,
     ServerError,
+    SourceSyncFailed,
+    SourceSyncTimeout,
     StreamInterrupted,
     type ErrorDetail,
     type InvalidParam,
@@ -96,6 +98,47 @@ export {
 
 export { UPLOAD_MAX_BYTES, type UploadFileParams, type UploadSource } from './models/files.ts'
 
+export type { Scope } from './models/common.ts'
+
+export {
+    AGENT_DESCRIPTION_MAX_LENGTH,
+    AGENT_INSTRUCTIONS_MAX_LENGTH,
+    type AgentDetail,
+    type AgentSummary,
+    type CreateAgentParams,
+    type LlmModel,
+    type SetAgentModelsParams,
+    type UpdateAgentParams,
+} from './models/agents.ts'
+
+export {
+    SOURCE_MAX_FILES,
+    type CreateSourceParams,
+    type NamedFile,
+    type Source,
+    type SourceFile,
+    type SourceFileInput,
+    type SourceStatus,
+    type SourceStore,
+    type UpdateSourceParams,
+    type WaitSyncedParams,
+} from './models/sources.ts'
+
+export {
+    SKILL_DISPLAY_NAME_MAX_LENGTH,
+    SKILL_MAX_BYTES,
+    type CreateSkillParams,
+    type Skill,
+    type SkillArchive,
+    type SkillFiles,
+    type SkillFrontmatter,
+    type SkillSource,
+    type UpdateSkillParams,
+} from './models/skills.ts'
+
+export type { DocumentMetadata } from './resources/documents.ts'
+export type { ListMcpServersParams, McpServer } from './resources/mcp.ts'
+
 export type {
     CreateMemoryFileParams,
     ListMemoryFilesParams,
@@ -108,4 +151,9 @@ export { AssistantRun, StartedChat } from './streaming.ts'
 export type { ListThreadsParams } from './resources/threads.ts'
 export type { ChatResource } from './resources/chat.ts'
 export type { MemoryResource } from './resources/memory.ts'
+export type { AgentsResource } from './resources/agents.ts'
+export type { DocumentsResource } from './resources/documents.ts'
+export type { McpResource } from './resources/mcp.ts'
+export type { SkillsResource } from './resources/skills.ts'
+export type { SourcesResource } from './resources/sources.ts'
 export type { ThreadsResource } from './resources/threads.ts'

@@ -12,6 +12,8 @@
  * │   └── ServerError       5xx
  * ├── APIConnectionError    network / timeout — no response arrived
  * ├── StreamInterrupted     the server shut down mid-stream
+ * ├── SourceSyncFailed      a source stopped somewhere other than `synced`
+ * ├── SourceSyncTimeout     a source was still syncing when the wait ran out
  * ├── InvalidParams         arguments rejected before any request was sent
  * └── SDKError              a bug inside the SDK
  * ```
@@ -21,6 +23,7 @@
  */
 
 import type { Message } from './models/chat.ts'
+import type { Source } from './models/sources.ts'
 
 /** Base class for every error raised by the SDK. */
 export class ComintyError extends Error {
@@ -134,6 +137,34 @@ export class StreamInterrupted extends ComintyError {
     constructor(message: string, partial: Message) {
         super(message)
         this.partial = partial
+    }
+}
+
+/**
+ * `sources.waitSynced` saw the source stop in a status other than `synced`.
+ *
+ * `source` is the source as last read: its `status` says where it stopped
+ * (`error`, `paused`, `archived`, `daily_quota_reached`, ...).
+ */
+export class SourceSyncFailed extends ComintyError {
+    readonly source: Source
+    constructor(message: string, source: Source) {
+        super(message)
+        this.source = source
+    }
+}
+
+/**
+ * `sources.waitSynced` ran out of time while the source was still syncing.
+ *
+ * `source` is the source as last read, or `null` if no read finished in time.
+ * The sync itself carries on server-side: wait again to keep following it.
+ */
+export class SourceSyncTimeout extends ComintyError {
+    readonly source: Source | null
+    constructor(message: string, source: Source | null) {
+        super(message)
+        this.source = source
     }
 }
 

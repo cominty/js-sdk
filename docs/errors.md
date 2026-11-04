@@ -23,6 +23,8 @@ ComintyError
 │   └── ServerError       5xx
 ├── APIConnectionError    no response arrived: network failure or timeout
 ├── StreamInterrupted     the server shut down mid-stream
+├── SourceSyncFailed      sources.waitSynced: the source stopped somewhere other than synced
+├── SourceSyncTimeout     sources.waitSynced: the source was still syncing at the timeout
 ├── InvalidParams         arguments rejected before any request was sent
 └── SDKError              unexpected state, or a run consumed twice
 ```
@@ -67,6 +69,9 @@ Two kinds of error are deliberately **not** `ComintyError`:
 | Iterating a run, `run.result()`, `run.text()`, `run.questions()` | `APIError`, `APIConnectionError`, `StreamInterrupted`, `SDKError` |
 | `threads.*` | `APIError`, `APIConnectionError` |
 | `memory.*` | `InvalidParams`, `APIError`, `APIConnectionError` |
+| `agents.*`, `skills.*`, `documents.get`, `mcp.list` | `InvalidParams`, `APIError`, `APIConnectionError` |
+| `sources.*` | `InvalidParams`, `APIError`, `APIConnectionError`; `SDKError` for a source with no files to list (a connected store) |
+| `sources.waitSynced` | The above, plus `SourceSyncFailed` and `SourceSyncTimeout`, both with `.source` |
 
 Note that a run can fail **while streaming**, after `chat.start` has already
 succeeded. Wrap the code that consumes the run, not just the call that creates
