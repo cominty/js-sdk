@@ -17,6 +17,13 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const work = mkdtempSync(join(tmpdir(), 'cominty-sdk-smoke-'))
 
+// Run from `npm publish --dry-run`, the nested npm calls would inherit the dry
+// run and write no tarball and install nothing.
+const env = { ...process.env }
+for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'npm_config_dry_run') delete env[key]
+}
+
 const CONSUMER = `
 import assert from 'node:assert/strict'
 import {
@@ -65,6 +72,7 @@ console.log('smoke test passed on node ' + process.version)
 try {
     execFileSync('npm', ['pack', '--ignore-scripts', '--pack-destination', work], {
         cwd: root,
+        env,
         stdio: 'ignore',
     })
     const tarball = readdirSync(work).find((name) => name.endsWith('.tgz'))
@@ -77,6 +85,7 @@ try {
     writeFileSync(join(work, 'consumer.mjs'), CONSUMER)
     execFileSync('npm', ['install', '--no-audit', '--no-fund', `./${tarball}`], {
         cwd: work,
+        env,
         stdio: 'ignore',
     })
     execFileSync(process.execPath, ['consumer.mjs'], { cwd: work, stdio: 'inherit' })

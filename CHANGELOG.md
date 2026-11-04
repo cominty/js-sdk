@@ -9,6 +9,8 @@ are always called out under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-04
+
 ### Added
 
 Ports the resources of the Python SDK 1.2.0.
@@ -114,7 +116,8 @@ First public release.
 - Typed error hierarchy rooted at `ComintyError`.
 - Client-side parameter validation that reports every invalid argument at once.
 
-[Unreleased]: https://github.com/cominty/js-sdk/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cominty/js-sdk/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/cominty/js-sdk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cominty/js-sdk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cominty/js-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cominty/js-sdk/releases/tag/v0.1.0
